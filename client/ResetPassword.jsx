@@ -1,4 +1,5 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 import _ from 'underscore';
 import $ from 'jquery';
 
@@ -128,7 +129,7 @@ class InnerResetPassword extends React.Component {
                 </div>);
         });
 
-        return (       
+        return (
             <div>
                 { errorBar }
                 <form className='form form-horizontal'>
@@ -144,9 +145,9 @@ class InnerResetPassword extends React.Component {
 }
 
 InnerResetPassword.propTypes = {
-    id: React.PropTypes.string,
-    navigate: React.PropTypes.func,
-    token: React.PropTypes.string
+    id: PropTypes.string,
+    navigate: PropTypes.func,
+    token: PropTypes.string
 };
 InnerResetPassword.displayName = 'ResetPassword';
 

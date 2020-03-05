@@ -1,13 +1,13 @@
-const MenuPrompt = require('../../../server/game/gamesteps/menuprompt.js');
-const Player = require('../../../server/game/player.js');
+const MenuPrompt = require('../../../build/server/game/gamesteps/menuprompt.js');
+const Player = require('../../../build/server/game/player.js');
 
 describe('the MenuPrompt', function() {
     beforeEach(function() {
-        var game = new jasmine.createSpyObj('game', ['playerDecked', 'raiseEvent']);
+        var game = new jasmine.createSpyObj('game', ['playerDecked', 'emitEvent', 'addMessage', 'getOtherPlayer', 'resetClocks']);
 
-        this.player = new Player('1', 'Player 1', true, game);
+        this.player = new Player('1', { username: 'Player 1', settings: {} }, true, game);
         this.player.initialise();
-        this.otherPlayer = new Player('2', 'Player 2', false, game);
+        this.otherPlayer = new Player('2', { username: 'Player 2', settings: {} }, false, game);
         this.otherPlayer.initialise();
         game.playersAndSpectators = {};
         game.playersAndSpectators[this.player.name] = this.player;
@@ -24,7 +24,9 @@ describe('the MenuPrompt', function() {
         spyOn(this.contextObj, 'doIt');
         spyOn(this.contextObj, 'forbiddenMethod');
 
+        this.context = { name: 'context' };
         this.properties = {
+            context: this.context,
             activePrompt: {
                 buttons: [{ command: 'menuButton', text: 'Do it!', method: 'doIt' }]
             }
@@ -38,47 +40,31 @@ describe('the MenuPrompt', function() {
     describe('the onMenuCommand() function', function() {
         describe('when the player is not the prompted player', function() {
             it('should return false', function() {
-                expect(this.prompt.onMenuCommand(this.otherPlayer, this.arg, 'doIt')).toBe(false);
+                expect(this.prompt.onMenuCommand(this.otherPlayer, this.arg, this.prompt.uuid, 'doIt')).toBe(false);
             });
 
             it('should not complete the prompt', function() {
-                this.prompt.onMenuCommand(this.otherPlayer, this.arg, 'doIt');
+                this.prompt.onMenuCommand(this.otherPlayer, this.arg, this.prompt.uuid, 'doIt');
                 expect(this.prompt.isComplete()).toBe(false);
             });
         });
 
         describe('when the method does not exist', function() {
             it('should return false', function() {
-                expect(this.prompt.onMenuCommand(this.player, this.arg, 'unknownMethod')).toBe(false);
+                expect(this.prompt.onMenuCommand(this.player, this.arg, this.prompt.uuid, 'unknownMethod')).toBe(false);
             });
 
             it('should not complete the prompt', function() {
-                this.prompt.onMenuCommand(this.player, this.arg, 'unknownMethod');
+                this.prompt.onMenuCommand(this.player, this.arg, this.prompt.uuid, 'unknownMethod');
                 expect(this.prompt.isComplete()).toBe(false);
             });
         });
 
         describe('when the method exists', function() {
-            describe('when there is no button for the method', function() {
-                it('should not call the specified method on the context object', function() {
-                    this.prompt.onMenuCommand(this.player, this.arg, 'forbiddenMethod');
-                    expect(this.contextObj.forbiddenMethod).not.toHaveBeenCalled();
-                });
-
-                it('should return false', function() {
-                    expect(this.prompt.onMenuCommand(this.player, this.arg, 'forbiddenMethod')).toBe(false);
-                });
-
-                it('should not complete the prompt', function() {
-                    this.prompt.onMenuCommand(this.player, this.arg, 'forbiddenMethod');
-                    expect(this.prompt.isComplete()).toBe(false);
-                });
-            });
-
             describe('when the method has a corresponding button', function() {
                 it('should call the specified method on the context object', function() {
-                    this.prompt.onMenuCommand(this.player, this.arg, 'doIt');
-                    expect(this.contextObj.doIt).toHaveBeenCalledWith(this.player, this.arg, 'doIt');
+                    this.prompt.onMenuCommand(this.player, this.arg, this.prompt.uuid, 'doIt');
+                    expect(this.contextObj.doIt).toHaveBeenCalledWith(this.player, this.arg, this.context);
                 });
 
                 describe('when the method returns false', function() {
@@ -87,12 +73,12 @@ describe('the MenuPrompt', function() {
                     });
 
                     it('should not complete the prompt', function() {
-                        this.prompt.onMenuCommand(this.player, this.arg, 'doIt');
+                        this.prompt.onMenuCommand(this.player, this.arg, this.prompt.uuid, 'doIt');
                         expect(this.prompt.isComplete()).toBe(false);
                     });
 
                     it('should return true', function() {
-                        expect(this.prompt.onMenuCommand(this.player, this.arg, 'doIt')).toBe(true);
+                        expect(this.prompt.onMenuCommand(this.player, this.arg, this.prompt.uuid, 'doIt')).toBe(true);
                     });
                 });
 
@@ -102,12 +88,12 @@ describe('the MenuPrompt', function() {
                     });
 
                     it('should complete the prompt', function() {
-                        this.prompt.onMenuCommand(this.player, this.arg, 'doIt');
+                        this.prompt.onMenuCommand(this.player, this.arg, this.prompt.uuid, 'doIt');
                         expect(this.prompt.isComplete()).toBe(true);
                     });
 
                     it('should return true', function() {
-                        expect(this.prompt.onMenuCommand(this.player, this.arg, 'doIt')).toBe(true);
+                        expect(this.prompt.onMenuCommand(this.player, this.arg, this.prompt.uuid, 'doIt')).toBe(true);
                     });
                 });
             });

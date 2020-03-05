@@ -1,149 +1,218 @@
 const _ = require('underscore');
 
-const BaseStep = require('./basestep.js');
-const GamePipeline = require('../gamepipeline.js');
+const BaseStepWithPipeline = require('./basestepwithpipeline.js');
 const SimpleStep = require('./simplestep.js');
+const InitiateCardAbilityEvent = require('../Events/InitiateCardAbilityEvent');
+const InitiateAbilityEventWindow = require('../Events/InitiateAbilityEventWindow');
+const { Locations, Stages, CardTypes, EventNames } = require('../Constants');
 
-class AbilityResolver extends BaseStep {
-    constructor(game, ability, context) {
+class AbilityResolver extends BaseStepWithPipeline {
+    constructor(game, context) {
         super(game);
 
-        this.ability = ability;
         this.context = context;
-        this.pipeline = new GamePipeline();
+        this.canCancel = true;
+        this.initiateAbility = false;
+        this.passPriority = false;
+        this.events = [];
+        this.provincesToRefill = [];
+        this.targetResults = {};
+        this.costResults = this.getCostResults();
+        this.initialise();
+    }
+
+    initialise() {
         this.pipeline.initialise([
-            new SimpleStep(game, () => this.markActionAsTaken()),
-            new SimpleStep(game, () => this.game.pushAbilityContext('card', context.source, 'cost')),
-            new SimpleStep(game, () => this.resolveCosts()),
-            new SimpleStep(game, () => this.waitForCostResolution()),
-            new SimpleStep(game, () => this.payCosts()),
-            new SimpleStep(game, () => this.game.popAbilityContext()),
-            new SimpleStep(game, () => this.game.pushAbilityContext('card', context.source, 'effect')),
-            new SimpleStep(game, () => this.resolveTargets()),
-            new SimpleStep(game, () => this.waitForTargetResolution()),
-            new SimpleStep(game, () => this.executeHandler()),
-            new SimpleStep(game, () => this.raiseCardPlayedIfEvent()),
-            new SimpleStep(game, () => this.game.popAbilityContext())
+            new SimpleStep(this.game, () => this.createSnapshot()),
+            new SimpleStep(this.game, () => this.resolveEarlyTargets()),
+            new SimpleStep(this.game, () => this.checkForCancel()),
+            new SimpleStep(this.game, () => this.openInitiateAbilityEventWindow()),
+            new SimpleStep(this.game, () => this.refillProvinces())
         ]);
     }
 
-    queueStep(step) {
-        this.pipeline.queueStep(step);
+    createSnapshot() {
+        if([CardTypes.Character, CardTypes.Holding, CardTypes.Attachment].includes(this.context.source.getType())) {
+            this.context.cardStateWhenInitiated = this.context.source.createSnapshot();
+        }
     }
 
-    isComplete() {
-        return this.pipeline.length === 0;
-    }
-
-    onCardClicked(player, card) {
-        return this.pipeline.handleCardClicked(player, card);
-    }
-
-    onMenuCommand(player, arg, method) {
-        return this.pipeline.handleMenuCommand(player, arg, method);
-    }
-
-    cancelStep() {
-        this.pipeline.cancelStep();
-    }
-
-    continue() {
-        try {
-            return this.pipeline.continue();
-        } catch(e) {
-            this.game.reportError(e);
-
-            let currentAbilityContext = this.game.currentAbilityContext;
-            if(currentAbilityContext && currentAbilityContext.source === 'card' && currentAbilityContext.card === this.context.source) {
-                this.game.popAbilityContext();
+    openInitiateAbilityEventWindow() {
+        if(this.cancelled) {
+            return;
+        }
+        let eventName = EventNames.Unnamed;
+        let eventProps = {};
+        if(this.context.ability.isCardAbility()) {
+            eventName = EventNames.OnCardAbilityInitiated;
+            eventProps = {
+                card: this.context.source,
+                ability: this.context.ability,
+                context: this.context
+            };
+            if(this.context.ability.isCardPlayed()) {
+                this.events.push(this.game.getEvent(EventNames.OnCardPlayed, {
+                    player: this.context.player,
+                    card: this.context.source,
+                    context: this.context,
+                    originalLocation: this.context.source.location,
+                    playType: this.context.playType,
+                    resolver: this
+                }));
             }
+            if(this.context.ability.isTriggeredAbility()) {
+                this.events.push(this.game.getEvent(EventNames.OnCardAbilityTriggered, {
+                    player: this.context.player,
+                    card: this.context.source,
+                    context: this.context
+                }));
+            }
+        }
+        this.events.push(this.game.getEvent(eventName, eventProps, () => this.queueInitiateAbilitySteps()));
+        this.game.queueStep(new InitiateAbilityEventWindow(this.game, this.events));
+    }
 
-            return true;
+    queueInitiateAbilitySteps() {
+        this.queueStep(new SimpleStep(this.game, () => this.resolveCosts()));
+        this.queueStep(new SimpleStep(this.game, () => this.payCosts()));
+        this.queueStep(new SimpleStep(this.game, () => this.checkCostsWerePaid()));
+        this.queueStep(new SimpleStep(this.game, () => this.resolveTargets()));
+        this.queueStep(new SimpleStep(this.game, () => this.checkForCancel()));
+        this.queueStep(new SimpleStep(this.game, () => this.initiateAbilityEffects()));
+        this.queueStep(new SimpleStep(this.game, () => this.executeHandler()));
+        this.queueStep(new SimpleStep(this.game, () => this.moveEventCardToDiscard()));
+    }
+
+    resolveEarlyTargets() {
+        this.context.stage = Stages.PreTarget;
+        if(!this.context.ability.cannotTargetFirst) {
+            this.targetResults = this.context.ability.resolveTargets(this.context);
         }
     }
 
-    markActionAsTaken() {
-        if(this.ability.isAction()) {
-            this.game.markActionAsTaken();
+    checkForCancel() {
+        if(this.cancelled) {
+            return;
         }
+
+        this.cancelled = this.targetResults.cancelled;
     }
 
     resolveCosts() {
-        this.context.costs = {};
-        this.canPayResults = this.ability.resolveCosts(this.context);
+        if(this.cancelled) {
+            return;
+        }
+        this.costResults.canCancel = this.canCancel;
+        this.context.stage = Stages.Cost;
+        this.context.ability.resolveCosts(this.context, this.costResults);
     }
 
-    waitForCostResolution() {
-        this.cancelled = _.any(this.canPayResults, result => result.resolved && !result.value);
-
-        if(!_.all(this.canPayResults, result => result.resolved)) {
-            return false;
-        }
+    getCostResults() {
+        return {
+            cancelled: false,
+            canCancel: this.canCancel,
+            events: [],
+            playCosts: true,
+            triggerCosts: true
+        };
     }
 
     payCosts() {
         if(this.cancelled) {
             return;
+        } else if(this.costResults.cancelled) {
+            this.cancelled = true;
+            return;
         }
+        this.passPriority = true;
+        if(this.costResults.events.length > 0) {
+            this.game.openEventWindow(this.costResults.events);
+        }
+    }
 
-        this.ability.payCosts(this.context);
+    checkCostsWerePaid() {
+        if(this.cancelled) {
+            return;
+        }
+        this.cancelled = _.any(this.costResults.events, event => event.getResolutionEvent().cancelled);
+        if(this.cancelled) {
+            this.game.addMessage('{0} attempted to use {1}, but did not successfully pay the required costs', this.context.player, this.context.source);
+        }
     }
 
     resolveTargets() {
         if(this.cancelled) {
             return;
         }
+        this.context.stage = Stages.Target;
 
-        this.context.targets = {};
-        this.targetResults = this.ability.resolveTargets(this.context);
+        if(!this.context.ability.hasLegalTargets(this.context)) {
+            // Ability cannot resolve, so display a message and cancel it
+            this.game.addMessage('{0} attempted to use {1}, but there are insufficient legal targets', this.context.player, this.context.source);
+            this.cancelled = true;
+        } else if(this.targetResults.delayTargeting) {
+            // Targeting was delayed due to an opponent needing to choose targets (which shouldn't happen until costs have been paid), so continue
+            this.targetResults = this.context.ability.resolveRemainingTargets(this.context, this.targetResults.delayTargeting);
+        } else if(this.targetResults.payCostsFirst || !this.context.ability.checkAllTargets(this.context)) {
+            // Targeting was stopped by the player choosing to pay costs first, or one of the chosen targets is no longer legal. Retarget from scratch
+            this.targetResults = this.context.ability.resolveTargets(this.context);
+        }
     }
 
-    waitForTargetResolution() {
+    initiateAbilityEffects() {
         if(this.cancelled) {
+            for(const event of this.events) {
+                event.cancel();
+            }
             return;
         }
 
-        this.cancelled = _.any(this.targetResults, result => result.resolved && !result.value);
-
-        if(!_.all(this.targetResults, result => result.resolved)) {
-            return false;
+        if(this.context.ability.isCardPlayed()) {
+            if(this.context.source.isLimited()) {
+                this.context.player.limitedPlayed += 1;
+            }
+            if(this.game.currentConflict) {
+                this.game.currentConflict.addCardPlayed(this.context.player, this.context.source);
+            }
         }
 
-        _.each(this.targetResults, result => {
-            this.context.targets[result.name] = result.value;
-            if(result.name === 'target') {
-                this.context.target = result.value;
+        // Increment limits (limits aren't used up on cards in hand)
+        if(this.context.ability.limit && this.context.source.location !== Locations.Hand &&
+           (!this.context.cardStateWhenInitiated || this.context.cardStateWhenInitiated.location === this.context.source.location)) {
+            this.context.ability.limit.increment(this.context.player);
+        }
+        if(this.context.ability.max) {
+            this.context.player.incrementAbilityMax(this.context.ability.maxIdentifier);
+        }
+        this.context.ability.displayMessage(this.context);
+
+        if(this.context.ability.isTriggeredAbility()) {
+            // If this is an event, move it to 'being played', and queue a step to send it to the discard pile after it resolves
+            if(this.context.ability.isCardPlayed()) {
+                this.game.actions.moveCard({ destination: Locations.BeingPlayed }).resolve(this.context.source, this.context);
             }
-        });
+            this.game.openThenEventWindow(new InitiateCardAbilityEvent({ card: this.context.source, context: this.context }, () => this.initiateAbility = true));
+        } else {
+            this.initiateAbility = true;
+        }
     }
 
     executeHandler() {
-        if(this.cancelled) {
+        if(this.cancelled || !this.initiateAbility) {
             return;
         }
+        this.context.stage = Stages.Effect;
+        this.context.ability.executeHandler(this.context);
+    }
 
-        // Check to make sure the ability is actually a card ability. For
-        // instance, marshaling does not count as initiating a card ability and
-        // thus is not subject to cancels such as Treachery.
-        if(this.ability.isCardAbility()) {
-            this.game.raiseEvent('onCardAbilityInitiated', { player: this.context.player, source: this.context.source }, () => {
-                this.ability.executeHandler(this.context);
-            });
-        } else {
-            this.ability.executeHandler(this.context);
+    moveEventCardToDiscard() {
+        if(this.context.source.location === Locations.BeingPlayed) {
+            this.context.player.moveCard(this.context.source, Locations.ConflictDiscardPile);
         }
     }
 
-    raiseCardPlayedIfEvent() {
-        // An event card is considered to be played even if it has been
-        // cancelled. Raising the event here will allow forced reactions and
-        // reactions to fire with the appropriate timing. There are no cards
-        // with an interrupt to a card being played. If any are ever released,
-        // then this event will need to wrap the execution of the entire
-        // ability instead.
-        if(this.ability.isPlayableEventAbility()) {
-            this.game.raiseEvent('onCardPlayed', { player: this.context.player, card: this.context.source });
-        }
+    refillProvinces() {
+        this.context.refill();
     }
 }
 

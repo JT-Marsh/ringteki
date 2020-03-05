@@ -1,6 +1,5 @@
 # Ringteki
 
-
 Web based implementation of The Legend of the Five Rings LCG
 
 ## FAQ
@@ -23,6 +22,8 @@ If you are going to contribute code, try and follow the style of the existing co
 
 [Documentation for implementing cards](https://github.com/gryffon/ringteki/blob/master/docs/implementing-cards.md)
 
+There is also a list of events raised by the code [here](https://docs.google.com/spreadsheets/d/1gJEGGwZcbVoUZnuc0zkKNblleVP0qoMWUQOvI_8G3mQ/edit?usp=sharing). If you're writing abilities which listen for these events, it tells you what parameters the event has and whether it has a handler.  If you're writing code which calls any of these events, please make sure you pass the same parameters.
+
 The biggest help at the moment would be in terms of CSS, as that's a bit of a weakness of mine, feel free to pick up any of the issues tagged 'CSS' in the issue list.
 
 If you're not coding inclined, then just playing games on the site, and reporting bugs and issues that you find is a big help
@@ -38,17 +39,23 @@ Check out the [About page](https://jigoku.online/about)  of a Ringteki live depl
 
 ## Development
 
-The game uses mongodb as storage so you'll need that installed and running.
+#### Required Software
+* Git
+* Node.js 8
+* MongoDB
+* ZeroMQ Libraries
+* TypeScript
 
 ```
 Clone the repository
 git submodule init
 git submodule update
 npm install # See https://github.com/JustinTulloss/zeromq.node/issues/283 for zmq errors on OS X
-mkdir server/logs
-node server/fetchdata.js
+tsc
+mkdir build/server/logs
+node server/scripts/fetchdata.js
 node .
-node server/gamenode
+node build/server/gamenode
 ```
 
 There are two exectuable components and you'll need to configure/run both to run a local server.  First is the lobby server and then there are game nodes. The default configurations assume you are running mongo locally on the default port. If you need to change any configurations, edit `config/default.json5` or create a `config/local.json5` configuration that overrides any desired settings.   
@@ -91,8 +98,10 @@ If you are making any game engine changes, these will not be accepted without un
 [Sentry.io - RingTeki](https://sentry.io/ringteki-team/ringteki/)
 
 ### Build Status
-
-[![CircleCI](https://circleci.com/gh/gryffon/ringteki.svg?style=svg)](https://circleci.com/gh/gryffon/ringteki)
 [![Travis Build](https://travis-ci.org/gryffon/ringteki.svg?branch=master)](https://travis-ci.org/gryffon/ringteki)
 
+### Discord Discusson
+[Ringteki Discord Server](https://discord.gg/tMzhyND)
 
+### Coveralls.io
+[![Coverage Status](https://coveralls.io/repos/github/gryffon/ringteki/badge.svg?branch=develop)](https://coveralls.io/github/gryffon/ringteki?branch=develop)

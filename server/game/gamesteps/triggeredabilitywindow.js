@@ -1,133 +1,44 @@
 const _ = require('underscore');
-const uuid = require('uuid');
 
-const BaseAbilityWindow = require('./baseabilitywindow.js');
+const ForcedTriggeredAbilityWindow = require('./forcedtriggeredabilitywindow.js');
 const TriggeredAbilityWindowTitles = require('./triggeredabilitywindowtitles.js');
 
-class TriggeredAbilityWindow extends BaseAbilityWindow {
-    constructor(game, properties) {
-        super(game, properties);
+const { CardTypes, EventNames, AbilityTypes } = require('../Constants');
 
-        this.forceWindowPerPlayer = {};
-
-        _.each(game.getPlayersInFirstPlayerOrder(), player => {
-            if(this.isCancellableEvent(player)) {
-                this.forceWindowPerPlayer[player.name] = true;
-            }
-        });
+class TriggeredAbilityWindow extends ForcedTriggeredAbilityWindow {
+    constructor(game, abilityType, window, eventsToExclude = []) {
+        super(game, abilityType, window, eventsToExclude);
+        this.complete = false;
+        this.prevPlayerPassed = false;
     }
 
-    registerAbility(ability, event) {
-        let context = ability.createContext(event);
-        let player = context.player;
-        let choiceTexts = ability.getChoices(context);
-
-        _.each(choiceTexts, choiceText => {
-            this.abilityChoices.push({
-                id: uuid.v1(),
-                player: player,
-                ability: ability,
-                card: ability.card,
-                text: choiceText.text,
-                choice: choiceText.choice,
-                context: context
-            });
-        });
-    }
-
-    continue() {
-        this.players = this.filterChoicelessPlayers(this.players || this.game.getPlayersInFirstPlayerOrder());
-
-        if(this.players.length === 0 || _.size(this.abilityChoices) === 0 && !this.forceWindowPerPlayer[this.players[0].name]) {
+    showBluffPrompt(player) {
+        // Show a bluff prompt if the player has an event which could trigger (but isn't in their hand) and that setting
+        if(player.timerSettings.eventsInDeck && this.choices.some(context => context.player === player)) {
             return true;
         }
-
-        this.promptPlayer(this.players[0]);
-
-        return false;
+        // Show a bluff prompt if we're in Step 6, the player has the approriate setting, and there's an event for the other player
+        return this.abilityType === AbilityTypes.WouldInterrupt && player.timerSettings.events && _.any(this.events, event => (
+            event.name === EventNames.OnInitiateAbilityEffects &&
+            event.card.type === CardTypes.Event && event.context.player !== player
+        ));
     }
 
-    isCancellableEvent(player) {
-        let cancellableEvents = {
-            onCardAbilityInitiated: 'cancelinterrupt',
-            onClaimApplied: 'interrupt'
-        };
-
-        return !player.noTimer && (!player.user.settings || player.user.settings.windowTimer !== 0) && _.any(this.events, event => {
-            return event.player !== player && cancellableEvents[event.name] && cancellableEvents[event.name] === this.abilityType;
-        });
-    }
-
-    filterChoicelessPlayers(players) {
-        return _.filter(players, player => this.isCancellableEvent(player) || _.any(this.abilityChoices, abilityChoice => this.eligibleChoiceForPlayer(abilityChoice, player)));
-    }
-
-    eligibleChoiceForPlayer(abilityChoice, player) {
-        return abilityChoice.player === player && abilityChoice.ability.meetsRequirements(abilityChoice.context);
-    }
-
-    promptPlayer(player) {
-        let choicesForPlayer = _.filter(this.abilityChoices, abilityChoice => this.eligibleChoiceForPlayer(abilityChoice, player));
-        let buttons = _.map(choicesForPlayer, abilityChoice => {
-            let title = abilityChoice.card.name;
-            if(abilityChoice.text !== 'default') {
-                title += ' - ' + abilityChoice.text;
-            }
-
-            return { text: title, method: 'chooseAbility', arg: abilityChoice.id, card: abilityChoice.card };
-        });
-
-        if(this.isCancellableEvent(player)) {
-            buttons.push({ timer: true, method: 'pass', id: uuid.v1() });
-            buttons.push({ text: 'I need more time', timerCancel: true });
-            buttons.push({ text: 'Don\'t ask again until end of round', timerCancel: true, method: 'pass', arg: 'pauseRound' });
-        }
-
-        buttons.push({ text: 'Pass', method: 'pass' });
+    promptWithBluffPrompt(player) {
         this.game.promptWithMenu(player, this, {
+            source: 'Triggered Abilities',
+            waitingPromptTitle: 'Waiting for opponent',
             activePrompt: {
-                menuTitle: TriggeredAbilityWindowTitles.getTitle(this.abilityType, this.events[0]),
-                buttons: buttons
-            },
-            waitingPromptTitle: 'Waiting for opponents'
-        });
-
-        this.forceWindowPerPlayer[player.name] = false;
-    }
-
-    getChoicesForPlayer(player) {
-        let choices = _.filter(this.abilityChoices, abilityChoice => {
-            try {
-                return this.eligibleChoiceForPlayer(abilityChoice, player);
-            } catch(e) {
-                this.abilityChoices = _.reject(this.abilityChoices, a => a === abilityChoice);
-                this.game.reportError(e);
-                return false;
+                promptTitle: TriggeredAbilityWindowTitles.getTitle(this.abilityType, this.events),
+                controls: this.getPromptControls(),
+                buttons: [
+                    { timer: true, method: 'pass' },
+                    { text: 'I need more time', timerCancel: true },
+                    { text: 'Don\'t ask again until end of round', timerCancel: true, method: 'pass', arg: 'pauseRound' },
+                    { text: 'Pass', method: 'pass' }
+                ]
             }
         });
-        // Cards that have a maximum should only display a single choice by
-        // title even if multiple copies are available to be triggered.
-        return _.uniq(choices, choice => choice.ability.hasMax() ? choice.card.name : choice);
-    }
-
-    chooseAbility(player, id) {
-        let choice = _.find(this.abilityChoices, ability => ability.id === id);
-
-        if(!choice || choice.player !== player) {
-            return false;
-        }
-
-        choice.context.choice = choice.choice;
-        this.game.resolveAbility(choice.ability, choice.context);
-
-        this.abilityChoices = _.reject(this.abilityChoices, ability => ability.card === choice.card);
-
-        // Always rotate player order without filtering, in case an ability is
-        // triggered that could then make another ability eligible after it is
-        // resolved: e.g. Rains of Castamere into Wardens of the West
-        this.players = this.rotatedPlayerOrder(player);
-
-        return true;
     }
 
     pass(player, arg) {
@@ -135,17 +46,62 @@ class TriggeredAbilityWindow extends BaseAbilityWindow {
             player.noTimer = true;
             player.resetTimerAtEndOfRound = true;
         }
+        if(this.prevPlayerPassed || !this.currentPlayer.opponent) {
+            this.complete = true;
+        } else {
+            this.currentPlayer = this.currentPlayer.opponent;
+            this.prevPlayerPassed = true;
+        }
 
-        this.players.shift();
         return true;
     }
 
-    rotatedPlayerOrder(player) {
-        let players = this.game.getPlayersInFirstPlayerOrder();
-        let splitIndex = players.indexOf(player);
-        let beforePlayer = players.slice(0, splitIndex);
-        let afterPlayer = players.slice(splitIndex + 1);
-        return afterPlayer.concat(beforePlayer).concat([player]);
+    filterChoices() {
+        // If both players have passed, close the window
+        if(this.complete) {
+            return true;
+        }
+        // remove any choices which involve the current player canceling their own abilities
+        if(this.abilityType === AbilityTypes.WouldInterrupt && !this.currentPlayer.optionSettings.cancelOwnAbilities) {
+            this.choices = this.choices.filter(context => !(
+                context.player === this.currentPlayer &&
+                context.event.name === EventNames.OnInitiateAbilityEffects &&
+                context.event.context.player === this.currentPlayer
+            ));
+        }
+
+        // if the current player has no available choices in this window, check to see if they should get a bluff prompt
+        if(!_.any(this.choices, context => context.player === this.currentPlayer && context.ability.isInValidLocation(context))) {
+            if(this.showBluffPrompt(this.currentPlayer)) {
+                this.promptWithBluffPrompt(this.currentPlayer);
+                return false;
+            }
+            // Otherwise pass
+            this.pass();
+            return this.filterChoices();
+        }
+
+        // Filter choices for current player, and prompt
+        this.choices = _.filter(this.choices, context => context.player === this.currentPlayer && context.ability.isInValidLocation(context));
+        this.promptBetweenSources(this.choices);
+        return false;
+    }
+
+    postResolutionUpdate(resolver) {
+        super.postResolutionUpdate(resolver);
+        this.prevPlayerPassed = false;
+        this.currentPlayer = this.currentPlayer.opponent || this.currentPlayer;
+    }
+
+    getPromptForSelectProperties() {
+        return _.extend(super.getPromptForSelectProperties(), {
+            selectCard: this.currentPlayer.optionSettings.markCardsUnselectable,
+            buttons: [{ text: 'Pass', arg: 'pass' }],
+            onMenuCommand: (player, arg) => {
+                this.pass(player, arg);
+                return true;
+            }
+        });
     }
 }
 

@@ -8,32 +8,30 @@ const config = require('config');
 const passport = require('passport');
 const localStrategy = require('passport-local').Strategy;
 const logger = require('./log.js');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 const api = require('./api');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const http = require('http');
 const Raven = require('raven');
-const pug = require('pug');
+const helmet = require('helmet');
+const webpackDevMiddleware = require('webpack-dev-middleware');
+const webpackHotMiddleware = require('webpack-hot-middleware');
+const webpack = require('webpack');
+const webpackConfig = require('../webpack.config.js');
+const monk = require('monk');
+const _ = require('underscore');
 
-const UserService = require('./repositories/UserService.js');
+const UserService = require('./services/UserService.js');
 const version = require('../version.js');
-
-const defaultWindows = {
-    plot: false,
-    draw: false,
-    challengeBegin: false,
-    attackersDeclared: true,
-    defendersDeclared: true,
-    winnerDetermined: false,
-    dominance: false,
-    standing: false
-};
+const Settings = require('./settings.js');
 
 class Server {
     constructor(isDeveloping) {
-        this.userService = new UserService({ dbPath: config.dbPath });
+        let db = monk(config.dbPath);
+        this.userService = new UserService(db);
         this.isDeveloping = isDeveloping;
+        // @ts-ignore
         this.server = http.Server(app);
     }
 
@@ -45,12 +43,22 @@ class Server {
             app.use(Raven.errorHandler());
         }
 
+        app.use(helmet());
+
+        app.set('trust proxy', 1);
         app.use(session({
             store: new MongoStore({ url: config.dbPath }),
             saveUninitialized: false,
             resave: false,
             secret: config.secret,
-            cookie: { maxAge: config.cookieLifetime }
+            cookie: {
+                maxAge: config.cookieLifetime,
+                secure: config.https,
+                httpOnly: false,
+                domain: config.domain
+            },
+            name: 'sessionId'
+
         }));
 
         app.use(passport.initialize());
@@ -71,11 +79,6 @@ class Server {
         app.set('views', path.join(__dirname, '..', 'views'));
 
         if(this.isDeveloping) {
-            const webpackDevMiddleware = require('webpack-dev-middleware');
-            const webpackHotMiddleware = require('webpack-hot-middleware');
-            const webpackConfig = require('../webpack.config.js');
-            const webpack = require('webpack');
-
             const compiler = webpack(webpackConfig);
             const middleware = webpackDevMiddleware(compiler, {
                 hot: true,
@@ -98,30 +101,24 @@ class Server {
                 path: '/__webpack_hmr',
                 heartbeat: 2000
             }));
-
-            app.get('*', function response(req, res) {
-                var token = undefined;
-
-                if(req.user) {
-                    token = jwt.sign(req.user, config.secret);
-                }
-
-                var html = pug.renderFile('views/index.pug', { basedir: path.join(__dirname, '..', 'views'), user: req.user, token: token });
-                middleware.fileSystem.writeFileSync(path.join(__dirname, '..', 'public/index.html'), html);
-                res.write(middleware.fileSystem.readFileSync(path.join(__dirname, '..', 'public/index.html')));
-                res.end();
-            });
-        } else {
-            app.get('*', (req, res) => {
-                var token = undefined;
-
-                if(req.user) {
-                    token = jwt.sign(req.user, config.secret);
-                }
-
-                res.render('index', { basedir: path.join(__dirname, '..', 'views'), user: req.user, token: token, production: !this.isDeveloping });
-            });
         }
+
+        app.get('*', (req, res) => {
+            let token = undefined;
+
+            if(req.user) {
+                token = jwt.sign(req.user, config.secret);
+                req.user = _.omit(req.user, 'blockList');
+            }
+
+            res.render('index', { basedir: path.join(__dirname, '..', 'views'), user: Settings.getUserWithDefaultsSet(req.user), token: token, production: !this.isDeveloping });
+        });
+
+        // Define error middleware last
+        app.use(function(err, req, res, next) { // eslint-disable-line no-unused-vars
+            res.status(500).send({ success: false });
+            logger.error(err);
+        });
 
         return this.server;
     }
@@ -129,12 +126,12 @@ class Server {
     run() {
         var port = config.lobby.port;
 
-        this.server.listen(port, '0.0.0.0', function onStart(err) {
+        this.server.listen(port, '127.0.0.1', function onStart(err) {
             if(err) {
                 logger.error(err);
             }
 
-            logger.info('==> 🌎 Listening on port %s. Open up http://0.0.0.0:%s/ in your browser.', port, port);
+            logger.info('==> ?? Listening on port %s. Open up http://0.0.0.0:%s/ in your browser.', port, port);
         });
     }
 
@@ -158,16 +155,21 @@ class Server {
                         return done(null, false, { message: 'Invalid username/password' });
                     }
 
-                    return done(null, {
+                    let userObj = {
                         username: user.username,
                         email: user.email,
                         emailHash: user.emailHash,
                         _id: user._id,
                         admin: user.admin,
-                        settings: user.settings || {},
-                        promptedActionWindows: user.promptedActionWindows || defaultWindows,
-                        permissions: user.permissions || {}
-                    });
+                        settings: user.settings,
+                        promptedActionWindows: user.promptedActionWindows,
+                        permissions: user.permissions,
+                        blockList: user.blockList
+                    };
+
+                    userObj = Settings.getUserWithDefaultsSet(userObj);
+
+                    return done(null, userObj);
                 });
             })
             .catch(err => {
@@ -190,18 +192,20 @@ class Server {
                     return done(new Error('user not found'));
                 }
 
-                done(null, {
+                let userObj = {
                     username: user.username,
                     email: user.email,
                     emailHash: user.emailHash,
                     _id: user._id,
                     admin: user.admin,
-                    settings: user.settings || {},
-                    promptedActionWindows: user.promptedActionWindows || defaultWindows,
-                    permissions: user.permissions || {}
-                });
+                    settings: user.settings,
+                    promptedActionWindows: user.promptedActionWindows,
+                    permissions: user.permissions,
+                    blockList: user.blockList
+                };
+
+                done(null, userObj);
             });
     }
 }
-
 module.exports = Server;

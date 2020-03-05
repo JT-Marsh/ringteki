@@ -2,7 +2,8 @@ const _ = require('underscore');
 
 const Phase = require('./phase.js');
 const SimpleStep = require('./simplestep.js');
-const DynastyActionOrPassPrompt = require('./dynasty/dynastyactionorpassprompt.js');
+const DynastyActionWindow = require('./dynasty/dynastyactionwindow.js');
+const { Locations, Phases } = require('../Constants');
 
 /*
 I Dynasty Phase
@@ -17,44 +18,51 @@ I Dynasty Phase
 
 class DynastyPhase extends Phase {
     constructor(game) {
-        super(game, 'dynasty');
+        super(game, Phases.Dynasty);
         this.initialise([
             new SimpleStep(game, () => this.beginDynasty()),
-            new SimpleStep(game, () => this.cyclePlayers()),
-            new SimpleStep(game, () => this.dynastyActionOrPassStep())
+            new SimpleStep(game, () => this.flipDynastyCards()),
+            new SimpleStep(game, () => this.collectFate()),
+            new SimpleStep(game, () => this.dynastyActionWindowStep())
         ]);
     }
 
-    beginDynasty() {
-        this.allPlayers = this.game.getPlayersInFirstPlayerOrder();
-        this.remainingPlayers = this.allPlayers;
+    createPhase() {
+        this.game.roundNumber++;
+        this.game.conflictRecord = [];
+        super.createPhase();
+    }
 
-        _.each(this.allPlayers, player => {
+    beginDynasty() {
+        _.each(this.game.getPlayersInFirstPlayerOrder(), player => {
             player.beginDynasty();
         });
-
     }
 
-    cyclePlayers () {
-
-        if(typeof this.currentPlayer === 'undefined') {
-            //Get First Player
-            this.currentPlayer = this.remainingPlayers.shift();
-        }
-
-
-    }
-
-    dynastyActionOrPassStep() {
-
-        if(this.currentPlayer.passedDynasty !== true) {
-
-            if(this.currentPlayer.passedDynasty === false) {
-                this.game.queueStep(new DynastyActionOrPassPrompt(this.game, this.currentPlayer));
+    flipDynastyCards () {
+        _.each(this.game.getPlayersInFirstPlayerOrder(), player => {
+            let revealedCards = [];
+            for(let province of [Locations.ProvinceOne, Locations.ProvinceTwo, Locations.ProvinceThree, Locations.ProvinceFour]) {
+                let card = player.getDynastyCardInProvince(province);
+                if(card && card.facedown) {
+                    this.game.applyGameAction(null, { flipDynasty: card });
+                    revealedCards.push(card);
+                }
             }
+            if(revealedCards.length > 0) {
+                this.game.queueSimpleStep(() => this.game.addMessage('{0} reveals {1}', player, revealedCards));
+            }
+        });
+    }
 
-        }
+    collectFate() {
+        _.each(this.game.getPlayersInFirstPlayerOrder(), player => {
+            player.collectFate();
+        });
+    }
 
+    dynastyActionWindowStep() {
+        this.game.queueStep(new DynastyActionWindow(this.game));
     }
 
 }

@@ -4,6 +4,7 @@ class Spectator {
         this.name = this.user.username;
         this.emailHash = this.user.emailHash;
         this.id = id;
+        this.lobbyId = null;
 
         this.buttons = [];
         this.menuTitle = 'Spectator mode';
@@ -11,6 +12,18 @@ class Spectator {
 
     getCardSelectionState() {
         return {};
+    }
+
+    getRingSelectionState() {
+        return {};
+    }
+
+    getShortSummary() {
+        return {
+            name: this.name,
+            id: this.id,
+            type: 'spectator'
+        };
     }
 }
 

@@ -1,8 +1,9 @@
-const ChatCommands = require('../../../server/game/chatcommands.js');
+const ChatCommands = require('../../../build/server/game/chatcommands.js');
 
 describe('ChatCommands', function() {
     beforeEach(function() {
-        this.gameSpy = jasmine.createSpyObj('game', ['addMessage', 'promptForSelect']);
+        this.gameSpy = jasmine.createSpyObj('game', ['addMessage', 'promptForSelect', 'getFrameworkContext', 'queueStep','queueSimpleStep', 'openEventWindow']);
+        this.gameSpy.getFrameworkContext.and.returnValue({ game: this.gameSpy, player: this.playerSpy });
 
         this.playerSpy = jasmine.createSpyObj('player', ['drawCardsToHand', 'discardAtRandom', 'discardFromDraw']);
         this.chatCommands = new ChatCommands(this.gameSpy);
@@ -81,40 +82,6 @@ describe('ChatCommands', function() {
                     this.chatCommands.executeCommand(this.playerSpy, '/draw', ['/draw', '4']);
 
                     expect(this.playerSpy.drawCardsToHand).toHaveBeenCalledWith(4);
-                });
-            });
-        });
-
-        describe('with a /discard command', function() {
-            describe('with no arguments', function() {
-                it('should discard 1 card', function () {
-                    this.chatCommands.executeCommand(this.playerSpy, '/discard', ['/discard']);
-
-                    expect(this.playerSpy.discardAtRandom).toHaveBeenCalledWith(1);
-                });
-            });
-
-            describe('with a string argument', function() {
-                it('should discard 1 card', function () {
-                    this.chatCommands.executeCommand(this.playerSpy, '/discard', ['/discard', 'test']);
-
-                    expect(this.playerSpy.discardAtRandom).toHaveBeenCalledWith(1);
-                });
-            });
-
-            describe('with a negative argument', function() {
-                it('should discard 1 card', function () {
-                    this.chatCommands.executeCommand(this.playerSpy, '/discard', ['/discard', '-1']);
-
-                    expect(this.playerSpy.discardAtRandom).toHaveBeenCalledWith(1);
-                });
-            });
-
-            describe('with a valid argument', function() {
-                it('should discard the passed amount of cards', function () {
-                    this.chatCommands.executeCommand(this.playerSpy, '/discard', ['/discard', '3']);
-
-                    expect(this.playerSpy.discardAtRandom).toHaveBeenCalledWith(3);
                 });
             });
         });

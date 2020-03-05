@@ -14,7 +14,7 @@ function selectDeck(state, deck) {
 function processDecks(decks, state) {
     _.each(decks, deck => {
         if(!state.cards || !deck.faction) {
-            deck.validation = {};
+            deck.status = {};
             return;
         }
 
@@ -31,6 +31,10 @@ function processDecks(decks, state) {
             return { count: card.count, card: state.cards[card.card.id] };
         });
 
+        deck.role = _.map(deck.role, card => {
+            return { count: card.count, card: state.cards[card.card.id] };
+        });
+
         deck.provinceCards = _.map(deck.provinceCards, card => {
             return { count: card.count, card: state.cards[card.card.id] };
         });
@@ -43,7 +47,7 @@ function processDecks(decks, state) {
             return { count: card.count, card: state.cards[card.card.id] };
         });
 
-        deck.validation = validateDeck(deck, state.packs);
+        deck.status = validateDeck(deck, { packs: state.packs });
     });
 }
 
@@ -116,7 +120,7 @@ export default function(state = {}, action) {
                     newState.selectedDeck = newState.decks[0];
                 }
             }
-            
+
             return newState;
         case 'RECEIVE_DECK':
             newState = Object.assign({}, state, {
@@ -160,7 +164,7 @@ export default function(state = {}, action) {
             return newState;
         case 'ADD_DECK':
             var newDeck = { name: 'New Deck' };
-            
+
             newState = Object.assign({}, state, {
                 selectedDeck: newDeck,
                 deckSaved: false
@@ -193,7 +197,7 @@ export default function(state = {}, action) {
             });
 
             return newState;
-        case 'DECK_DELETED':            
+        case 'DECK_DELETED':
             newState = Object.assign({}, state, {
                 deckDeleted: true
             });

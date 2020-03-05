@@ -1,21 +1,25 @@
 const uuid = require('uuid');
 const _ = require('underscore');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 
 const logger = require('./log.js');
 const GameChat = require('./game/gamechat.js');
 
 class PendingGame {
     constructor(owner, details) {
-        this.owner = owner.username;
+        this.owner = owner;
         this.players = {};
         this.spectators = {};
         this.id = uuid.v1();
         this.name = details.name;
         this.allowSpectators = details.spectators;
+        this.spectatorSquelch = details.spectatorSquelch;
         this.gameType = details.gameType;
+        this.clocks = details.clocks;
         this.createdAt = new Date();
         this.gameChat = new GameChat();
+        this.node = null;
+        this.started = false;
     }
 
     // Getters
@@ -68,14 +72,14 @@ class PendingGame {
             name: user.username,
             user: user,
             emailHash: user.emailHash,
-            owner: this.owner === user.username
+            owner: this.owner.username === user.username
         };
     }
 
     addSpectator(id, user) {
         this.spectators[user.username] = {
             id: id,
-            name: user.userame,
+            name: user.username,
             user: user,
             emailHash: user.emailHash
         };
@@ -104,9 +108,17 @@ class PendingGame {
         }
     }
 
+    isUserBlocked(user) {
+        return _.contains(this.owner.blockList, user.username.toLowerCase());
+    }
+
     join(id, user, password, callback) {
-        if(_.size(this.players) === 2) {
-            callback(new Error('Too many players'), 'Too many players');
+        if(_.size(this.players) === 2 || this.started) {
+            return;
+        }
+
+        if(this.isUserBlocked(user)) {
+            return;
         }
 
         if(this.password) {
@@ -131,8 +143,14 @@ class PendingGame {
     }
 
     watch(id, user, password, callback) {
-        if(!this.allowSpectators || this.started) {
+        if(!this.allowSpectators) {
             callback(new Error('Join not permitted'));
+
+            return;
+        }
+
+        if(this.isUserBlocked(user)) {
+            return;
         }
 
         if(this.password) {
@@ -262,7 +280,8 @@ class PendingGame {
             }
 
             playerSummaries[player.name] = {
-                deck: activePlayer ? deck : undefined,
+                agenda: this.started && player.agenda ? player.agenda.cardData.code : undefined,
+                deck: activePlayer ? deck : {},
                 emailHash: player.emailHash,
                 faction: this.started && player.faction ? player.faction.value : undefined,
                 id: player.id,
@@ -275,6 +294,7 @@ class PendingGame {
 
         return {
             allowSpectators: this.allowSpectators,
+            clocks: this.clocks,
             createdAt: this.createdAt,
             gameType: this.gameType,
             id: this.id,
@@ -282,8 +302,9 @@ class PendingGame {
             name: this.name,
             needsPassword: !!this.password,
             node: this.node ? this.node.identity : undefined,
-            owner: this.owner,
+            owner: this.owner.username,
             players: playerSummaries,
+            spectatorSquelch: this.spectatorSquelch,
             started: this.started,
             spectators: _.map(this.spectators, spectator => {
                 return {

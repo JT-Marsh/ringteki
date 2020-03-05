@@ -1,30 +1,46 @@
-const AbilityResolver = require('../../../server/game/gamesteps/abilityresolver.js');
+const AbilityResolver = require('../../../build/server/game/gamesteps/abilityresolver.js');
 
 describe('AbilityResolver', function() {
     beforeEach(function() {
-        this.game = jasmine.createSpyObj('game', ['markActionAsTaken', 'popAbilityContext', 'pushAbilityContext', 'raiseEvent', 'reportError']);
+        this.game = jasmine.createSpyObj('game', ['getPlayers', 'markActionAsTaken', 'popAbilityContext', 'pushAbilityContext', 'getEvent', 'raiseEvent', 'reportError', 'openThenEventWindow', 'queueStep']);
         this.game.raiseEvent.and.callFake((name, params, handler) => {
             if(handler) {
                 handler(params);
             }
         });
-        this.ability = jasmine.createSpyObj('ability', ['isAction', 'isCardAbility', 'isPlayableEventAbility', 'resolveCosts', 'payCosts', 'resolveTargets', 'executeHandler']);
-        this.ability.isCardAbility.and.returnValue(true);
-        this.source = { source: 1 };
+        this.game.getEvent.and.callFake((name, params, handler) => {
+            if(handler) {
+                handler(params);
+            }
+            return { setWindow: () => true };
+        });
+
+        this.ability = jasmine.createSpyObj('ability', [
+            'isAction', 'isTriggeredAbility', 'isCardAbility', 'displayMessage', 'resolveCosts',
+            'resolveTargets', 'executeHandler', 'hasLegalTargets', 'checkAllTargets', 'isCardPlayed'
+        ]);
+        this.ability.isTriggeredAbility.and.returnValue(false);
+        this.ability.isCardAbility.and.returnValue(false);
+        this.ability.hasLegalTargets.and.returnValue(true);
+        this.ability.resolveTargets.and.returnValue({});
+        this.source = jasmine.createSpyObj('source', ['createSnapshot', 'getType']);
+        this.costEvent = jasmine.createSpyObj('costEvent', ['getResolutionEvent']);
+        this.costEvent.getResolutionEvent.and.returnValue({ cancelled: false });
         this.player = { player: 1 };
-        this.context = { foo: 'bar', player: this.player, source: this.source };
-        this.resolver = new AbilityResolver(this.game, this.ability, this.context);
+        this.game.getPlayers.and.returnValue([this.player]);
+        this.context = { foo: 'bar', player: this.player, source: this.source, ability: this.ability, targets: {}, selects: {}, rings: {} };
+        this.resolver = new AbilityResolver(this.game, this.context);
     });
 
     describe('continue()', function() {
-        describe('when the ability is an action', function() {
+        describe('when the ability comes from a character', function() {
             beforeEach(function() {
-                this.ability.isAction.and.returnValue(true);
+                this.source.getType.and.returnValue('character');
                 this.resolver.continue();
             });
 
-            it('should mark that an action is being taken', function() {
-                expect(this.game.markActionAsTaken).toHaveBeenCalled();
+            it('should create a snapshot of the character', function() {
+                expect(this.source.createSnapshot).toHaveBeenCalled();
             });
         });
 
@@ -32,10 +48,6 @@ describe('AbilityResolver', function() {
             beforeEach(function() {
                 this.ability.resolveCosts.and.returnValue([{ resolved: true, value: true }, { resolved: true, value: true }]);
                 this.resolver.continue();
-            });
-
-            it('should pay the costs', function() {
-                expect(this.ability.payCosts).toHaveBeenCalledWith(this.context);
             });
 
             it('should execute the handler', function() {
@@ -50,49 +62,36 @@ describe('AbilityResolver', function() {
         describe('when the ability is a card ability', function() {
             beforeEach(function() {
                 this.ability.resolveCosts.and.returnValue([{ resolved: true, value: true }, { resolved: true, value: true }]);
-                this.ability.isPlayableEventAbility.and.returnValue(true);
-                this.ability.isCardAbility.and.returnValue(true);
+                this.ability.isTriggeredAbility.and.returnValue(true);
                 this.resolver.continue();
             });
 
-            it('should raise the onCardAbilityInitiated event', function() {
-                expect(this.game.raiseEvent).toHaveBeenCalledWith('onCardAbilityInitiated', { player: this.player, source: this.source }, jasmine.any(Function));
+            it('should raise the InitiateAbility event', function() {
+                expect(this.game.openThenEventWindow).toHaveBeenCalledWith(jasmine.any(Object));
             });
         });
 
         describe('when the ability is not a card ability', function() {
             beforeEach(function() {
                 this.ability.resolveCosts.and.returnValue([{ resolved: true, value: true }, { resolved: true, value: true }]);
-                this.ability.isPlayableEventAbility.and.returnValue(true);
-                this.ability.isCardAbility.and.returnValue(false);
+                this.ability.isTriggeredAbility.and.returnValue(false);
                 this.resolver.continue();
             });
 
-            it('should not raise the onCardAbilityInitiated event', function() {
-                expect(this.game.raiseEvent).not.toHaveBeenCalledWith('onCardAbilityInitiated', jasmine.any(Object), jasmine.any(Function));
-            });
-        });
-
-        describe('when the ability is an event being played', function() {
-            beforeEach(function() {
-                this.ability.resolveCosts.and.returnValue([{ resolved: true, value: true }, { resolved: true, value: true }]);
-                this.ability.isPlayableEventAbility.and.returnValue(true);
-                this.resolver.continue();
-            });
-
-            it('should raise the onCardPlayed event', function() {
-                expect(this.game.raiseEvent).toHaveBeenCalledWith('onCardPlayed', jasmine.any(Object));
+            it('should not raise the onInitiateAbilityEffects event', function() {
+                expect(this.game.raiseEvent).not.toHaveBeenCalledWith('onInitiateAbilityEffects', jasmine.any(Object), jasmine.any(Function));
             });
         });
 
         describe('when not all costs can be paid', function() {
             beforeEach(function() {
-                this.ability.resolveCosts.and.returnValue([{ resolved: true, value: true }, { resolved: true, value: false }]);
-                this.resolver.continue();
+                this.resolver.canPayResults = { cancelled: true };
+                this.resolver.costEvents = [this.costEvent];
+                this.resolver.payCosts();
             });
 
             it('should not pay the costs', function() {
-                expect(this.ability.payCosts).not.toHaveBeenCalled();
+                expect(this.game.raiseEvent).not.toHaveBeenCalled();
             });
 
             it('should not execute the handler', function() {
@@ -100,132 +99,31 @@ describe('AbilityResolver', function() {
             });
         });
 
-        describe('when a cost cannot be immediately resolved', function() {
+        describe('when the costs have resolved', function() {
             beforeEach(function() {
-                this.canPayResult = { resolved: false };
+                this.canPayResult = { resolved: true };
                 this.ability.resolveCosts.and.returnValue([this.canPayResult]);
-                this.resolver.continue();
             });
 
-            it('should not pay the costs', function() {
-                expect(this.ability.payCosts).not.toHaveBeenCalled();
-            });
-
-            it('should not execute the handler', function() {
-                expect(this.ability.executeHandler).not.toHaveBeenCalled();
-            });
-
-            describe('when the costs have resolved', function() {
+            describe('and the cost could be paid', function() {
                 beforeEach(function() {
-                    this.canPayResult.resolved = true;
+                    this.canPayResult.value = true;
+                    this.resolver.continue();
                 });
 
-                describe('and the cost could be paid', function() {
-                    beforeEach(function() {
-                        this.canPayResult.value = true;
-                        this.resolver.continue();
-                    });
-
-                    it('should pay the costs', function() {
-                        expect(this.ability.payCosts).toHaveBeenCalledWith(this.context);
-                    });
-
-                    it('should execute the handler', function() {
-                        expect(this.ability.executeHandler).toHaveBeenCalledWith(this.context);
-                    });
-                });
-
-                describe('and the cost could not be paid', function() {
-                    beforeEach(function() {
-                        this.canPayResult.value = false;
-                        this.resolver.continue();
-                    });
-
-                    it('should not pay the costs', function() {
-                        expect(this.ability.payCosts).not.toHaveBeenCalled();
-                    });
-
-                    it('should not execute the handler', function() {
-                        expect(this.ability.executeHandler).not.toHaveBeenCalled();
-                    });
+                it('should execute the handler', function() {
+                    expect(this.ability.executeHandler).toHaveBeenCalledWith(this.context);
                 });
             });
-        });
 
-        describe('when there are targets that need to be resolved', function() {
-            beforeEach(function() {
-                this.targetResult = { resolved: false, name: 'foo', value: null };
-                this.ability.resolveTargets.and.returnValue([this.targetResult]);
-                this.resolver.continue();
-            });
-
-            it('should pay the costs', function() {
-                expect(this.ability.payCosts).toHaveBeenCalled();
-            });
-
-            it('should not execute the handler', function() {
-                expect(this.ability.executeHandler).not.toHaveBeenCalled();
-            });
-
-            describe('when the targets have resolved', function() {
+            describe('and the cost could not be paid', function() {
                 beforeEach(function() {
-                    this.targetResult.resolved = true;
+                    this.resolver.canPayResults = { cancelled: true };
+                    this.resolver.payCosts();
                 });
 
-                describe('and the targets were chosen', function() {
-                    beforeEach(function() {
-                        this.target = { foo: 'bar' };
-                        this.targetResult.value = this.target;
-                    });
-
-                    describe('and the target name is arbitrary', function() {
-                        beforeEach(function() {
-                            this.targetResult.name = 'foo';
-                            this.resolver.continue();
-                        });
-
-                        it('should add the target to context.targets', function() {
-                            expect(this.context.targets.foo).toBe(this.target);
-                        });
-
-                        it('should not add the target directly to context', function() {
-                            expect(this.context.target).toBeUndefined();
-                        });
-
-                        it('should execute the handler', function() {
-                            expect(this.ability.executeHandler).toHaveBeenCalledWith(this.context);
-                        });
-                    });
-
-                    describe('and the target name is "target"', function() {
-                        beforeEach(function() {
-                            this.targetResult.name = 'target';
-                            this.resolver.continue();
-                        });
-
-                        it('should add the target to context.targets', function() {
-                            expect(this.context.targets.target).toBe(this.target);
-                        });
-
-                        it('should add the target directly to context', function() {
-                            expect(this.context.target).toBe(this.target);
-                        });
-
-                        it('should execute the handler', function() {
-                            expect(this.ability.executeHandler).toHaveBeenCalledWith(this.context);
-                        });
-                    });
-                });
-
-                describe('and the targets were not chosen', function() {
-                    beforeEach(function() {
-                        this.targetResult.value = null;
-                        this.resolver.continue();
-                    });
-
-                    it('should not execute the handler', function() {
-                        expect(this.ability.executeHandler).not.toHaveBeenCalled();
-                    });
+                it('should not execute the handler', function() {
+                    expect(this.ability.executeHandler).not.toHaveBeenCalled();
                 });
             });
         });
@@ -249,17 +147,6 @@ describe('AbilityResolver', function() {
             it('should report the error', function() {
                 this.resolver.continue();
                 expect(this.game.reportError).toHaveBeenCalledWith(jasmine.any(Error));
-            });
-
-            describe('when the current ability context is for this ability', function() {
-                beforeEach(function() {
-                    this.game.currentAbilityContext = { source: 'card', card: this.context.source };
-                });
-
-                it('should pop the current context', function() {
-                    this.resolver.continue();
-                    expect(this.game.popAbilityContext).toHaveBeenCalled();
-                });
             });
         });
     });

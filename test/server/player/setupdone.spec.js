@@ -1,4 +1,4 @@
-const Player = require('../../../server/game/player.js');
+const Player = require('../../../build/server/game/player.js');
 
 function addCardsToHand(hand, number) {
     for(var i = 0; i < number; i++) {
@@ -10,7 +10,7 @@ describe('Player', function() {
     describe('setupDone', function() {
         beforeEach(function() {
             this.game = jasmine.createSpyObj('game', ['getOtherPlayer', 'playerDecked', 'raiseEvent']);
-            this.player = new Player('1', 'Player 1', true, this.game);
+            this.player = new Player('1', { username: 'Player 1', settings: {}}, true, this.game);
             this.player.deck = {};
             this.player.initialise();
 
@@ -28,8 +28,10 @@ describe('Player', function() {
             this.player.fate = 8;
 
             this.player.setupDone();
+            addCardsToHand(this.player.hand, 3);
         });
 
+        /* Don't have these steps in L5R setup
         describe('when the hand size is less than the starting hand size', function() {
             beforeEach(function() {
                 addCardsToHand(this.player.hand, 3);
@@ -70,7 +72,6 @@ describe('Player', function() {
             });
         });
 
-        /* Don't have these steps in L5R setup
         it('should turn all cards faceup', function() {
             expect(_.any(this.player.cardsInPlay, card => {
                 return card.facedown;

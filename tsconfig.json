@@ -1,0 +1,24 @@
+{
+  "compilerOptions": { 
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "es2017",
+    "sourceMap": true,
+    "outDir": "build",
+    "allowJs": true,
+    "checkJs": true,
+    "lib": [
+      "es2017",
+      "dom"
+    ]
+  },
+  "include": [
+    "server/**/*",
+    "index.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "test/**/*",
+    "client/**/*"
+  ]
+}

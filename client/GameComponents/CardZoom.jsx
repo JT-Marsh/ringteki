@@ -1,4 +1,5 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 
 class CardZoom extends React.Component {
     render() {
@@ -10,8 +11,8 @@ class CardZoom extends React.Component {
 
         return (
             <div className={ zoomClass }>
-                { this.props.show ?
-                    <div className='card-zoomed shadow'>
+                { this.props.show && this.props.cardName !== undefined ?
+                    <div className='card-zoomed shadow no-highlight'>
                         <span className='card-name'>{ this.props.cardName }</span>
                         <img src={ this.props.imageUrl } />
                     </div>
@@ -22,10 +23,10 @@ class CardZoom extends React.Component {
 
 CardZoom.displayName = 'CardZoom';
 CardZoom.propTypes = {
-    cardName: React.PropTypes.string,
-    imageUrl: React.PropTypes.string,
-    orientation: React.PropTypes.oneOf(['horizontal', 'vertical']),
-    show: React.PropTypes.bool
+    cardName: PropTypes.string,
+    imageUrl: PropTypes.string,
+    orientation: PropTypes.oneOf(['horizontal', 'vertical']),
+    show: PropTypes.bool
 };
 
 export default CardZoom;

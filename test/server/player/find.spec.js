@@ -1,16 +1,12 @@
-const Player = require('../../../server/game/player.js');
-const DrawCard = require('../../../server/game/drawcard.js');
+const Player = require('../../../build/server/game/player.js');
 
 describe('the Player', function() {
     beforeEach(function() {
-        this.game = jasmine.createSpyObj('game', ['getOtherPlayer', 'playerDecked', 'raiseEvent']);
-        this.player = new Player('1', 'Player 1', true, this.game);
-        this.attachment = new DrawCard(this.player, { code: '1', label: 'Attachment', type: 'attachment' });
-        this.attachment.uuid = '1111';
-        this.cardWithNoAttachments = new DrawCard(this.player, { code: '2', label: 'Character', type: 'character' });
-        this.cardWithNoAttachments.uuid = '2222';
-        this.cardWithAttachment = new DrawCard(this.player, { code: '3', label: 'Character', type: 'character' });
-        this.cardWithAttachment.uuid = '3333';
+        this.game = jasmine.createSpyObj('game', ['getOtherPlayer', 'playerDecked', 'emitEvent', 'addMessage']);
+        this.player = new Player('1', {username: 'Player 1', settings: {}}, true, this.game);
+        this.attachment = { id: '1', label: 'Attachment', uuid: '1111', type: 'attachment' };
+        this.cardWithNoAttachments = { id: '2', label: 'Character', type: 'character', uuid: '2222' };
+        this.cardWithAttachment = { id: '3', label: 'Character', type: 'character', uuid: '3333', attachments: [] };
         this.cardWithAttachment.attachments.push(this.attachment);
 
         this.player.initialise();
@@ -35,7 +31,7 @@ describe('the Player', function() {
 
             it('should return the card', function() {
                 expect(this.card).not.toBe(undefined);
-                expect(this.card.code).toBe('2');
+                expect(this.card.id).toBe('2');
             });
         });
 
@@ -46,7 +42,7 @@ describe('the Player', function() {
 
             it('should return the attachment', function() {
                 expect(this.card).not.toBe(undefined);
-                expect(this.card.code).toBe('1');
+                expect(this.card.id).toBe('1');
             });
         });
     });

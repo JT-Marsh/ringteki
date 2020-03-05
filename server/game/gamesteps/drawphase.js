@@ -1,8 +1,10 @@
-const _ = require('underscore');
 const Phase = require('./phase.js');
 const SimpleStep = require('./simplestep.js');
 const ActionWindow = require('./actionwindow.js');
-const DrawBidPrompt = require('./draw/drawbidprompt.js');
+const HonorBidPrompt = require('./honorbidprompt.js');
+const GameActions = require('../GameActions/GameActions');
+
+const { Phases, EffectNames } = require('../Constants');
 
 /*
 II Draw Phase
@@ -17,53 +19,25 @@ II Draw Phase
 
 class DrawPhase extends Phase {
     constructor(game) {
-        super(game, 'draw');
+        super(game, Phases.Draw);
         this.initialise([
-            new SimpleStep(game, () => this.bidPrompt()),
-            new SimpleStep(game, () => this.showBids()),
-            new ActionWindow(this.game, 'After bids revealed', 'draw'),
-            new SimpleStep(game, () => this.tradeHonor()),
-            new SimpleStep(game, () => this.drawConflict())
+            new SimpleStep(game, () => this.displayHonorBidPrompt()),
+            new SimpleStep(game, () => this.drawConflictCards()),
+            new ActionWindow(this.game, 'Action Window', 'draw')
         ]);
     }
 
-    bidPrompt() {
-        _.each(this.game.getPlayers(), p => {
-            this.queueStep(new DrawBidPrompt(this.game, p));
-        });
+    displayHonorBidPrompt() {
+        this.game.queueStep(new HonorBidPrompt(this.game, 'Choose how much honor to bid in the draw phase'));
     }
 
-    showBids() {
-
-
-        _.each(this.game.getPlayers(), p => {
-            p.showBid = p.drawBid;
-        });
-    }
-
-    tradeHonor() {
-
-        var honorDifference = 0;
-        var remainingPlayers = this.game.getPlayersInFirstPlayerOrder();
-        let currentPlayer = remainingPlayers.shift();
-        if(remainingPlayers.length > 0) {
-
-            var otherPlayer = this.game.getOtherPlayer(currentPlayer);
-            if(currentPlayer.drawBid > otherPlayer.drawBid) {
-                honorDifference = currentPlayer.drawBid - otherPlayer.drawBid;
-                this.game.transferHonor(otherPlayer, currentPlayer, honorDifference);
-            } else if(otherPlayer.drawBid > currentPlayer.drawBid) {
-                honorDifference = otherPlayer.drawBid - currentPlayer.drawBid;
-                this.game.transferHonor(currentPlayer, otherPlayer, honorDifference);
-            }
+    drawConflictCards() {
+        for(let player of this.game.getPlayers()) {
+            const min = player.honorBid === 0 ? 0 : 1;
+            const amount = Math.max(player.honorBid + player.sumEffects(EffectNames.ModifyCardsDrawnInDrawPhase), min);
+            this.game.addMessage('{0} draws {1} cards for the draw phase', player, amount);
+            GameActions.draw({ amount }).resolve(player, this.game.getFrameworkContext());
         }
-
-    }
-
-    drawConflict() {
-        _.each(this.game.getPlayers(), p => {
-            p.drawPhase();
-        });
     }
 }
 

@@ -1,33 +1,39 @@
 const _ = require('underscore');
 
-const BaseCard = require('./basecard.js');
+const BaseCard = require('./basecard');
 
 class StrongholdCard extends BaseCard {
     constructor(owner, cardData) {
         super(owner, cardData);
 
-        this.strengthModifier = 0;
-        this.fateModifier = 0;
-        this.honorModifier = 0;
-        this.influenceModifier = 0;
+        this.menu = _([{ command: 'bow', text: 'Bow/Ready' }]);
+        this.bowed = false;
 
         this.isStronghold = true;
     }
 
     getFate() {
-        return this.cardData.fate + this.fateModifier;
+        return this.cardData.fate;
     }
 
     getStartingHonor() {
-        return this.cardData.honor + this.honorModifier;
+        return this.cardData.honor;
     }
 
     getInfluence() {
-        return this.cardData.influence_pool + this.influenceModifier;
+        return this.cardData.influence_pool;
     }
 
-    getStrengthModifier() {
-        return this.cardData.province_strength_mod + this.strengthModifier;
+    getProvinceStrengthBonus() {
+        return parseInt(this.cardData.strength_bonus);
+    }
+
+    bow() {
+        this.bowed = true;
+    }
+
+    ready() {
+        this.bowed = false;
     }
 
     flipFaceup() {
@@ -39,11 +45,12 @@ class StrongholdCard extends BaseCard {
 
         return _.extend(baseSummary, {
             isStronghold: this.isStronghold,
-            strengthModifer: this.getStrengthModifier
+            childCards: this.childCards.map(card => {
+                return card.getSummary(activePlayer, hideWhenFaceup);
+            }),
+            bowed: this.bowed
         });
     }
-
-
 }
 
 module.exports = StrongholdCard;

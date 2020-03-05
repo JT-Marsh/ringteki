@@ -1,33 +1,45 @@
-const DynastyCardAction = require('../../server/game/dynastycardaction.js');
+const DynastyCardAction = require('../../build/server/game/dynastycardaction.js');
 
 describe('DynastyCardAction', function () {
     beforeEach(function() {
-        this.gameSpy = jasmine.createSpyObj('game', ['addMessage', 'on', 'removeListener']);
-        this.playerSpy = jasmine.createSpyObj('player', ['canPutIntoPlay', 'isCardInPlayableLocation', 'putIntoPlay']);
-        this.cardSpy = jasmine.createSpyObj('card', ['canBeDynastyed', 'getType']);
-        this.cardSpy.canBeDynastyed.and.returnValue(true);
+        this.gameSpy = jasmine.createSpyObj('game', ['addMessage', 'on', 'removeListener', 'getEvent', 'openEventWindow']);
+        this.playerSpy = jasmine.createSpyObj('player', ['isCardInPlayableLocation', 'replaceDynastyCard', 'getMinimumCost']);
+        this.cardSpy = jasmine.createSpyObj('card', ['getType', 'canPlay', 'isLimited', 'anotherUniqueInPlay', 'sumEffects']);
+        this.windowSpy = jasmine.createSpyObj('window', ['markActionAsTaken']);
+        this.cardSpy.sumEffects.and.returnValue(0);
+        this.cardSpy.isDynasty = true;
         this.cardSpy.controller = this.playerSpy;
         this.cardSpy.owner = this.playerSpy;
+        this.cardSpy.facedown = false;
+        this.cardSpy.location = 'province 1';
+        this.gameSpy.currentActionWindow = this.windowSpy;
+        this.windowSpy.currentPlayer = this.playerSpy;
+        this.gameSpy.abilityCardStack = ['framework'];
+        this.playerSpy.fate = 10;
         this.context = {
             costs: {},
             game: this.gameSpy,
             player: this.playerSpy,
             source: this.cardSpy
         };
-        this.action = new DynastyCardAction();
+        this.context.copy = () => this.context;
+        this.action = new DynastyCardAction(this.cardSpy);
     });
 
     describe('meetsRequirements()', function() {
         beforeEach(function() {
             this.gameSpy.currentPhase = 'dynasty';
-            this.playerSpy.canPutIntoPlay.and.returnValue(true);
             this.playerSpy.isCardInPlayableLocation.and.returnValue(true);
+            this.playerSpy.getMinimumCost.and.returnValue(0);
             this.cardSpy.getType.and.returnValue('character');
+            this.cardSpy.canPlay.and.returnValue(true);
+            this.cardSpy.isLimited.and.returnValue(false);
+            this.cardSpy.anotherUniqueInPlay.and.returnValue(false);
         });
 
         describe('when all conditions are met', function() {
-            it('should return true', function() {
-                expect(this.action.meetsRequirements(this.context)).toBe(true);
+            it('should return \'\'', function() {
+                expect(this.action.meetsRequirements(this.context)).toBe('');
             });
         });
 
@@ -36,8 +48,8 @@ describe('DynastyCardAction', function () {
                 this.gameSpy.currentPhase = 'conflict';
             });
 
-            it('should return false', function() {
-                expect(this.action.meetsRequirements(this.context)).toBe(false);
+            it('should return \'phase\'', function() {
+                expect(this.action.meetsRequirements(this.context)).toBe('phase');
             });
         });
 
@@ -46,38 +58,28 @@ describe('DynastyCardAction', function () {
                 this.playerSpy.isCardInPlayableLocation.and.returnValue(false);
             });
 
-            it('should return false', function() {
-                expect(this.action.meetsRequirements(this.context)).toBe(false);
+            it('should return \'location\'', function() {
+                expect(this.action.meetsRequirements(this.context)).toBe('location');
             });
         });
 
-        describe('when the card is an event', function() {
+        describe('when there is another unique copy of that card in play', function() {
             beforeEach(function() {
-                this.cardSpy.getType.and.returnValue('event');
+                this.cardSpy.anotherUniqueInPlay.and.returnValue(true);
             });
 
-            it('should return false', function() {
-                expect(this.action.meetsRequirements(this.context)).toBe(false);
-            });
-        });
-
-        describe('when the card is forbidden from being played in dynasty', function() {
-            beforeEach(function() {
-                this.cardSpy.canBeDynastyed.and.returnValue(false);
-            });
-
-            it('should return false', function() {
-                expect(this.action.meetsRequirements(this.context)).toBe(false);
+            it('should return \'unique\'', function() {
+                expect(this.action.meetsRequirements(this.context)).toBe('unique');
             });
         });
 
         describe('when the card cannot be put into play', function() {
             beforeEach(function() {
-                this.playerSpy.canPutIntoPlay.and.returnValue(false);
+                this.cardSpy.canPlay.and.returnValue(false);
             });
 
-            it('should return false', function() {
-                expect(this.action.meetsRequirements(this.context)).toBe(false);
+            it('should return \'cannotTrigger\'', function() {
+                expect(this.action.meetsRequirements(this.context)).toBe('cannotTrigger');
             });
         });
     });
@@ -88,7 +90,7 @@ describe('DynastyCardAction', function () {
         });
 
         it('should put the card into play', function() {
-            expect(this.playerSpy.putIntoPlay).toHaveBeenCalledWith(this.cardSpy, 'dynasty');
+            expect(this.gameSpy.openEventWindow).toHaveBeenCalled();
         });
     });
 });

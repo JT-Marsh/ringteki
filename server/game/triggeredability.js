@@ -1,124 +1,105 @@
 const _ = require('underscore');
 
-const BaseAbility = require('./baseability.js');
-const Costs = require('./costs.js');
+const CardAbility = require('./CardAbility.js');
+const TriggeredAbilityContext = require('./TriggeredAbilityContext.js');
+const { Stages, CardTypes } = require('./Constants.js');
 
-class TriggeredAbilityContext {
-    constructor(event, game, source) {
-        this.event = event;
-        this.game = game;
-        this.source = source;
-        this.player = source.controller;
-    }
+/**
+ * Represents a reaction/interrupt ability provided by card text.
+ *
+ * Properties:
+ * when    - object whose keys are event names to listen to for the reaction and
+ *           whose values are functions that return a boolean about whether to
+ *           trigger the reaction when that event is fired. For example, to
+ *           trigger only at the end of the challenge phase, you would do:
+ *           when: {
+ *               onPhaseEnded: event => event.phase === 'conflict'
+ *           }
+ *           Multiple events may be specified for cards that have multiple
+ *           possible triggers for the same reaction.
+ * title   - string which is displayed to the player to reference this ability
+ * cost    - object or array of objects representing the cost required to be
+ *           paid before the action will activate. See Costs.
+ * target  - object giving properties for the target API
+ * handler - function that will be executed if the player chooses 'Yes' when
+ *           asked to trigger the reaction. If the reaction has more than one
+ *           choice, use the choices sub object instead.
+ * limit   - optional AbilityLimit object that represents the max number of uses
+ *           for the reaction as well as when it resets.
+ * max     - optional AbilityLimit object that represents the max number of
+ *           times the ability by card title can be used. Contrast with `limit`
+ *           which limits per individual card.
+ * location - string or array of strings indicating the location the card should
+ *            be in in order to activate the reaction. Defaults to 'play area'.
+ */
 
-    cancel() {
-        this.event.cancel();
-    }
-
-    skipHandler() {
-        this.event.skipHandler();
-    }
-}
-
-class TriggeredAbility extends BaseAbility {
-    constructor(game, card, eventType, properties) {
-        super(properties);
-
-        const DefaultLocationForType = {
-            event: 'hand',
-            province: 'province'
-        };
-
-        this.game = game;
-        this.card = card;
-        this.limit = properties.limit;
+class TriggeredAbility extends CardAbility {
+    constructor(game, card, abilityType, properties) {
+        super(game, card, properties);
         this.when = properties.when;
-        this.eventType = eventType;
-        this.location = properties.location || DefaultLocationForType[card.getType()] || 'play area';
+        this.aggregateWhen = properties.aggregateWhen;
+        this.anyPlayer = !!properties.anyPlayer;
+        this.abilityType = abilityType;
+        this.collectiveTrigger = !!properties.collectiveTrigger;
+    }
 
-        if(card.getType() === 'event' && !properties.ignoreEventCosts) {
-            this.cost.push(Costs.playEvent());
+    meetsRequirements(context, ignoredRequirements = []) {
+        if(!ignoredRequirements.includes('player') && !this.anyPlayer && context.player !== this.card.controller) {
+            if(this.card.type !== CardTypes.Event || !context.player.isCardInPlayableLocation(this.card, context.playType)) {
+                return 'player';
+            }
+        }
+
+        return super.meetsRequirements(context, ignoredRequirements);
+    }
+
+    eventHandler(event, window) {
+        for(const player of this.game.getPlayers()) {
+            let context = this.createContext(player, event);
+            //console.log(event.name, this.card.name, this.isTriggeredByEvent(event, context), this.meetsRequirements(context));
+            if(this.card.reactions.includes(this) && this.isTriggeredByEvent(event, context) && this.meetsRequirements(context) === '') {
+                window.addChoice(context);
+            }
         }
     }
 
-    eventHandler(event) {
-        if(!this.isTriggeredByEvent(event)) {
-            return;
+    checkAggregateWhen(events, window) {
+        for(const player of this.game.getPlayers()) {
+            let context = this.createContext(player, events);
+            //console.log(events.map(event => event.name), this.card.name, this.aggregateWhen(events, context), this.meetsRequirements(context));
+            if(this.card.reactions.includes(this) && this.aggregateWhen(events, context) && this.meetsRequirements(context) === '') {
+                window.addChoice(context);
+            }
         }
-
-        this.game.registerAbility(this, event);
     }
 
-    createContext(event) {
-        return new TriggeredAbilityContext(event, this.game, this.card);
+    createContext(player = this.card.controller, event) {
+        return new TriggeredAbilityContext({
+            event: event,
+            game: this.game,
+            source: this.card,
+            player: player,
+            ability: this,
+            stage: Stages.PreTarget
+        });
     }
 
-    isTriggeredByEvent(event) {
+    isTriggeredByEvent(event, context) {
         let listener = this.when[event.name];
 
-        if(!listener) {
-            return false;
-        }
-
-        return listener(...event.params);
-    }
-
-    meetsRequirements(context) {
-        let isPlayableEventAbility = this.isPlayableEventAbility();
-
-        if(this.game.currentPhase === 'setup') {
-            return false;
-        }
-
-        if(!this.isForcedAbility() && context.player && context.player.cannotTriggerCardAbilities) {
-            return false;
-        }
-
-        if(this.limit && this.limit.isAtMax()) {
-            return false;
-        }
-
-        if(this.card.isBlank()) {
-            return false;
-        }
-
-        if(!this.isTriggeredByEvent(context.event)) {
-            return false;
-        }
-
-        if(isPlayableEventAbility && !context.player.isCardInPlayableLocation(this.card, 'play')) {
-            return false;
-        }
-
-        if(!isPlayableEventAbility && this.card.location !== this.location) {
-            return false;
-        }
-
-        if(!this.canPayCosts(context) || !this.canResolveTargets(context)) {
-            return false;
-        }
-
-        return true;
-    }
-
-    isEventListeningLocation(location) {
-        return this.location === location;
-    }
-
-    isAction() {
-        return false;
-    }
-
-    isPlayableEventAbility() {
-        return this.card.getType() === 'event' && this.location === 'hand';
-    }
-
-    isForcedAbility() {
-        return false;
+        return listener && listener(event, context);
     }
 
     registerEvents() {
         if(this.events) {
+            return;
+        } else if(this.aggregateWhen) {
+            const event = {
+                name: 'aggregateEvent:' + this.abilityType,
+                handler: (events, window) => this.checkAggregateWhen(events, window)
+            };
+            this.events = [event];
+            this.game.on(event.name, event.handler);
             return;
         }
 
@@ -127,16 +108,12 @@ class TriggeredAbility extends BaseAbility {
         this.events = [];
         _.each(eventNames, eventName => {
             var event = {
-                name: eventName + ':' + this.eventType,
-                handler: event => this.eventHandler(event)
+                name: eventName + ':' + this.abilityType,
+                handler: (event, window) => this.eventHandler(event, window)
             };
             this.game.on(event.name, event.handler);
             this.events.push(event);
         });
-
-        if(this.limit) {
-            this.limit.registerEvents(this.game);
-        }
     }
 
     unregisterEvents() {
@@ -144,9 +121,6 @@ class TriggeredAbility extends BaseAbility {
             _.each(this.events, event => {
                 this.game.removeListener(event.name, event.handler);
             });
-            if(this.limit) {
-                this.limit.unregisterEvents(this.game);
-            }
             this.events = null;
         }
     }

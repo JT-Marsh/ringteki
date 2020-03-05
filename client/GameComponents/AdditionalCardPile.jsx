@@ -1,7 +1,8 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 import _ from 'underscore';
 
-import CardCollection from './CardCollection.jsx';
+import CardPile from './CardPile.jsx';
 
 class AdditionalCardPile extends React.Component {
     render() {
@@ -13,7 +14,7 @@ class AdditionalCardPile extends React.Component {
         }
 
         return (
-            <CardCollection
+            <CardPile
                 className={ this.props.className }
                 title={ this.props.pile.title }
                 source='additional'
@@ -22,7 +23,7 @@ class AdditionalCardPile extends React.Component {
                 onMouseOver={ this.props.onMouseOver }
                 onMouseOut={ this.props.onMouseOut }
                 popupLocation={ this.props.isMe || this.props.spectating ? 'top' : 'bottom' }
-                disablePopup={ this.props.pile.isPrivate && !(this.props.isMe || this.props.spectating) }
+                disableMenu={ this.props.pile.isPrivate && !(this.props.isMe || this.props.spectating) }
                 orientation='horizontal' />
         );
     }
@@ -30,12 +31,12 @@ class AdditionalCardPile extends React.Component {
 
 AdditionalCardPile.displayName = 'AdditionalCardPile';
 AdditionalCardPile.propTypes = {
-    className: React.PropTypes.string,
-    isMe: React.PropTypes.bool,
-    onMouseOut: React.PropTypes.func,
-    onMouseOver: React.PropTypes.func,
-    pile: React.PropTypes.object,
-    spectating: React.PropTypes.bool
+    className: PropTypes.string,
+    isMe: PropTypes.bool,
+    onMouseOut: PropTypes.func,
+    onMouseOver: PropTypes.func,
+    pile: PropTypes.object,
+    spectating: PropTypes.bool
 };
 
 export default AdditionalCardPile;

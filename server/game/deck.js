@@ -4,6 +4,8 @@ const cards = require('./cards');
 const DrawCard = require('./drawcard.js');
 const ProvinceCard = require('./provincecard.js');
 const StrongholdCard = require('./strongholdcard.js');
+const RoleCard = require('./rolecard.js');
+const { Locations, CardTypes } = require('./Constants');
 
 class Deck {
     constructor(data) {
@@ -16,7 +18,8 @@ class Deck {
             conflictCards: [],
             dynastyCards: [],
             provinceCards: [],
-            stronghold: undefined
+            stronghold: undefined,
+            role: undefined
         };
 
         //faction
@@ -24,40 +27,54 @@ class Deck {
 
         //conflict
         this.eachRepeatedCard(this.data.conflictCards, cardData => {
-            if(['conflict'].includes(cardData.side)) {
+            if(cardData && ['conflict'].includes(cardData.side)) {
                 var conflictCard = this.createCard(DrawCard, player, cardData);
-                conflictCard.location = 'conflict deck';
+                conflictCard.location = Locations.ConflictDeck;
                 result.conflictCards.push(conflictCard);
             }
         });
 
         //dynasty
         this.eachRepeatedCard(this.data.dynastyCards, cardData => {
-            if(['dynasty'].includes(cardData.side)) {
+            if(cardData && ['dynasty'].includes(cardData.side)) {
                 var dynastyCard = this.createCard(DrawCard, player, cardData);
-                dynastyCard.location = 'dynasty deck';
+                dynastyCard.location = Locations.DynastyDeck;
                 result.dynastyCards.push(dynastyCard);
             }
         });
 
         this.eachRepeatedCard(this.data.provinceCards, cardData => {
-            if(cardData.type === 'province') {
+            if(cardData && cardData.type === CardTypes.Province) {
                 var provinceCard = this.createCard(ProvinceCard, player, cardData);
-                provinceCard.location = 'province deck';
+                provinceCard.location = Locations.ProvinceDeck;
                 result.provinceCards.push(provinceCard);
             }
         });
 
         this.eachRepeatedCard(this.data.stronghold, cardData => {
-            if(cardData.type === 'stronghold') {
+            if(cardData && cardData.type === CardTypes.Stronghold) {
                 var strongholdCard = this.createCard(StrongholdCard, player, cardData);
-                strongholdCard.location = 'stronghold province';
+                strongholdCard.location = '';
                 result.stronghold = strongholdCard;
             }
         });
 
+        this.eachRepeatedCard(this.data.role, cardData => {
+            if(cardData && cardData.type === CardTypes.Role) {
+                var roleCard = this.createCard(RoleCard, player, cardData);
+                result.role = roleCard;
+            }
+        });
+
         result.allCards = result.provinceCards.concat(result.conflictCards).concat(result.dynastyCards);
-        result.allCards.push(result.stronghold);
+
+        if(result.stronghold) {
+            result.allCards.push(result.stronghold);
+        }
+
+        if(result.role) {
+            result.allCards.push(result.role);
+        }
 
         return result;
     }

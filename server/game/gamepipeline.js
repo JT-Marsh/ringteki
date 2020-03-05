@@ -71,10 +71,21 @@ class GamePipeline {
         return false;
     }
 
-    handleMenuCommand(player, arg, method) {
+    handleRingClicked(player, ring) {
         if(this.pipeline.length > 0) {
             var step = this.getCurrentStep();
-            if(step.onMenuCommand(player, arg, method) !== false) {
+            if(step.onRingClicked(player, ring) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    handleMenuCommand(player, arg, uuid, method) {
+        if(this.pipeline.length > 0) {
+            var step = this.getCurrentStep();
+            if(step.onMenuCommand(player, arg, uuid, method) !== false) {
                 return true;
             }
         }
@@ -83,6 +94,10 @@ class GamePipeline {
     }
 
     continue() {
+        if(this.queue.length > 0) {
+            this.pipeline = this.queue.concat(this.pipeline);
+            this.queue = [];
+        }
         while(this.pipeline.length > 0) {
             var currentStep = this.getCurrentStep();
 
@@ -125,6 +140,16 @@ class GamePipeline {
         }
 
         return name;
+    }
+
+    consoleDebugInfo() {
+        let pipeline = this;
+        let step = pipeline.pipeline[0];
+        while(step.pipeline) {
+            pipeline = step.pipeline;
+            step = pipeline.pipeline[0];
+        }
+        // console.log(pipeline.getDebugInfo());
     }
 }
 

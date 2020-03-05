@@ -1,61 +1,41 @@
-const _ = require('underscore');
-const BaseStep = require('./basestep.js');
-const GamePipeline = require('../gamepipeline.js');
+const BaseStepWithPipeline = require('./basestepwithpipeline.js');
 const SimpleStep = require('./simplestep.js');
+const { EventNames } = require('../Constants');
 
-class Phase extends BaseStep {
+class Phase extends BaseStepWithPipeline {
     constructor(game, name) {
         super(game);
         this.name = name;
-        this.pipeline = new GamePipeline();
+        this.steps = [];
     }
 
     initialise(steps) {
-        var startStep = new SimpleStep(this.game, () => this.startPhase());
-        var endStep = new SimpleStep(this.game, () => this.endPhase());
-        this.pipeline.initialise([startStep].concat(steps).concat([endStep]));
+        this.pipeline.initialise([new SimpleStep(this.game, () => this.createPhase())]);
+        let startStep = new SimpleStep(this.game, () => this.startPhase());
+        let endStep = new SimpleStep(this.game, () => this.endPhase());
+        this.steps = [startStep].concat(steps).concat([endStep]);
     }
 
-    queueStep(step) {
-        this.pipeline.queueStep(step);
-    }
-
-    isComplete() {
-        return this.pipeline.length === 0;
-    }
-
-    onCardClicked(player, card) {
-        return this.pipeline.handleCardClicked(player, card);
-    }
-
-    onMenuCommand(player, arg, method) {
-        return this.pipeline.handleMenuCommand(player, arg, method);
-    }
-
-    cancelStep() {
-        this.pipeline.cancelStep();
-    }
-
-    continue() {
-        return this.pipeline.continue();
+    createPhase() {
+        this.game.raiseEvent(EventNames.OnPhaseCreated, { phase: this.name }, () => {
+            for(let step of this.steps) {
+                this.game.queueStep(step);
+            }
+        });
     }
 
     startPhase() {
-        this.game.currentPhase = this.name;
-        _.each(this.game.getPlayers(), player => {
-            player.phase = this.name;
+        this.game.raiseEvent(EventNames.OnPhaseStarted, { phase: this.name }, () => {
+            this.game.currentPhase = this.name;
+            if(this.name !== 'setup') {
+                this.game.addAlert('endofround', 'turn: {0} - {1} phase', this.game.roundNumber, this.name);
+            }
         });
-        this.game.reapplyStateDependentEffects();
-        this.game.raiseEvent('onPhaseStarted', { phase: this.name });
     }
 
     endPhase() {
-        this.game.raiseEvent('onPhaseEnded', { phase: this.name });
+        this.game.raiseEvent(EventNames.OnPhaseEnded, { phase: this.name });
         this.game.currentPhase = '';
-        _.each(this.game.getPlayers(), player => {
-            player.phase = '';
-        });
-        this.game.raiseEvent('onAtEndOfPhase');
     }
 }
 

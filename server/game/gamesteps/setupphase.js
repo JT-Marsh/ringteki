@@ -4,65 +4,81 @@ const SimpleStep = require('./simplestep.js');
 const MulliganDynastyPrompt = require('./setup/mulligandynastyprompt.js');
 const MulliganConflictPrompt = require('./setup/mulliganconflictprompt.js');
 const SetupProvincesPrompt = require('./setup/setupprovincesprompt.js');
+const { Locations } = require('../Constants');
 
 class SetupPhase extends Phase {
     constructor(game) {
         super(game, 'setup');
-        var players = _.filter(game.getPlayers(), player => !game.isSpectator(player));
-        this.initialise([
+        this.game.currentPhase = this.name;
+        this.pipeline.initialise([
             new SimpleStep(game, () => this.setupBegin()),
-            new SimpleStep(game, () => this.prepareDecks()),
-            new SetupProvincesPrompt(game),
+            new SimpleStep(game, () => this.chooseFirstPlayer()),
             new SimpleStep(game, () => this.attachStronghold()),
+            new SetupProvincesPrompt(game),
             new SimpleStep(game, () => this.fillProvinces()),
-            new MulliganDynastyPrompt(game, players[0]),
-            new MulliganDynastyPrompt(game, players[1]),
-            new MulliganConflictPrompt(game, players[0]),
-            new MulliganConflictPrompt(game, players[1]),
-            new SimpleStep(game, () => this.startGame()),
-            new SimpleStep(game, () => this.setupDone())
+            new MulliganDynastyPrompt(game),
+            new SimpleStep(game, () => this.drawStartingHands()),
+            new MulliganConflictPrompt(game),
+            new SimpleStep(game, () => this.startGame())
         ]);
     }
 
     setupBegin() {
-        _.each(this.game.getPlayers(), player => {
-            player.setupBegin();
-        });
-
         let allPlayersShuffled = _.shuffle(this.game.getPlayers());
 
         let firstPlayer = allPlayersShuffled.shift();
         firstPlayer.firstPlayer = true;
     }
 
+    chooseFirstPlayer() {
+        let firstPlayer = this.game.getFirstPlayer();
+        if(firstPlayer.opponent) {
+            this.game.promptWithHandlerMenu(firstPlayer, {
+                activePromptTitle: 'You won the flip. Do you want to be:',
+                source: 'Choose First Player',
+                choices: ['First Player', 'Second Player'],
+                handlers: [
+                    () => {},
+                    () => {
+                        this.game.setFirstPlayer(firstPlayer.opponent);
+                    }
+                ]
+            });
+        }
+    }
+
     attachStronghold() {
         _.each(this.game.getPlayers(), player => {
-            player.attachStronghold();
+            player.moveCard(player.stronghold, Locations.StrongholdProvince);
+            if(player.role) {
+                player.role.moveTo(Locations.Role);
+            }
         });
     }
 
     fillProvinces() {
         _.each(this.game.getPlayers(), player => {
-            player.fillProvinces();
+            for(let province of [Locations.ProvinceOne, Locations.ProvinceTwo, Locations.ProvinceThree, Locations.ProvinceFour]) {
+                let card = player.dynastyDeck.first();
+                if(card) {
+                    player.moveCard(card, province);
+                    card.facedown = false;
+                }
+            }
         });
         this.game.allCards.each(card => {
             card.applyAnyLocationPersistentEffects();
         });
     }
 
-    prepareDecks() {
-        this.game.raiseEvent('onDecksPrepared');
+    drawStartingHands() {
+        _.each(this.game.getPlayers(), player => player.drawCardsToHand(4));
     }
 
     startGame() {
         _.each(this.game.getPlayers(), player => {
-            player.startGame();
-        });
-    }
-
-    setupDone() {
-        _.each(this.game.getPlayers(), p => {
-            p.setupDone();
+            player.honor = player.stronghold.cardData.honor;
+            player.readyToStart = true;
         });
     }
 }

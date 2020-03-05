@@ -1,13 +1,15 @@
+const { Stages } = require('./Constants.js');
+
 class ImmunityRestriction {
-    constructor(cardCondition) {
-        this.cardCondition = cardCondition;
+    constructor(condition) {
+        this.condition = condition;
     }
 
     isMatch(type, abilityContext) {
         return (
-            abilityContext.stage === 'effect' &&
-            abilityContext.card &&
-            this.cardCondition(abilityContext.card)
+            abilityContext &&
+            abilityContext.stage !== Stages.Cost &&
+            this.condition(abilityContext)
         );
     }
 }

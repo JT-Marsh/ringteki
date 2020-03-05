@@ -1,5 +1,5 @@
 const EventEmitter = require('events');
-const zmq = require('zmq');
+const zmq = require('zeromq');
 const config = require('config');
 const logger = require('../log.js');
 
@@ -33,12 +33,21 @@ class ZmqSocket extends EventEmitter {
     }
 
     onGameSync(games) {
-        this.send('HELLO', {
-            maxGames: config.maxGames,
-            address: this.listenAddress,
-            port: config.gameNode.socketioPort,
-            protocol: this.protocol,
-            games: games });
+        if(config.gameNode.proxyPort) {
+            this.send('HELLO', {
+                maxGames: config.maxGames,
+                address: this.listenAddress,
+                port: config.gameNode.proxyPort,
+                protocol: this.protocol,
+                games: games });
+        } else {
+            this.send('HELLO', {
+                maxGames: config.maxGames,
+                address: this.listenAddress,
+                port: config.gameNode.socketioPort,
+                protocol: this.protocol,
+                games: games });
+        }
     }
 
     onMessage(x, msg) {
@@ -54,24 +63,21 @@ class ZmqSocket extends EventEmitter {
         switch(message.command) {
             case 'PING':
                 this.send('PONG');
-
                 break;
             case 'STARTGAME':
                 this.emit('onStartGame', message.arg);
-
                 break;
             case 'SPECTATOR':
                 this.emit('onSpectator', message.arg.game, message.arg.user);
-
                 break;
             case 'CONNECTFAILED':
                 this.emit('onFailedConnect', message.arg.gameId, message.arg.username);
-
                 break;
-
             case 'CLOSEGAME':
                 this.emit('onCloseGame', message.arg.gameId);
-
+                break;
+            case 'CARDDATA':
+                this.emit('onCardData', message.arg);
                 break;
         }
     }

@@ -1,23 +1,25 @@
 /*eslint no-console: 0*/
 
 const _ = require('underscore');
+const monk = require('monk');
+
+const GameService = require('./services/GameService.js');
 const config = require('config');
 
-const GameRepository = require('./repositories/gameRepository.js');
-
-let gameRepository = new GameRepository(config.dbPath);
+let db = monk(config.dbPath);
+let gameService = new GameService(db);
 
 let args = process.argv.slice(2);
 
 if(_.size(args) < 2) {
     console.error('Must provide start and end date');
 
-    return;
+    db.close();
 }
 
 console.info('Running stats between', args[0], 'and', args[1]);
 
-gameRepository.getAllGames(args[0], args[1], (err, games) => {
+gameService.getAllGames(args[0], args[1]).then(games => {
     let rejected = { singlePlayer: 0, noWinner: 0 };
 
     console.info('' + _.size(games), 'total games');
@@ -25,7 +27,7 @@ gameRepository.getAllGames(args[0], args[1], (err, games) => {
     let players = {};
     let factions = {};
     let alliances = {};
-    let factionAgendas = {};
+    let factionAlliances = {};
 
     _.each(games, game => {
         if(_.size(game.players) !== 2) {
@@ -53,25 +55,25 @@ gameRepository.getAllGames(args[0], args[1], (err, games) => {
                 alliances[player.alliance] = { name: player.alliance, wins: 0, losses: 0 };
             }
 
-            if(!factionAgendas[player.faction + player.agenda]) {
-                factionAgendas[player.faction + player.agenda] = { name: player.faction + ' / ' + player.agenda, wins: 0, losses: 0 };
+            if(!factionAlliances[player.faction + player.agenda]) {
+                factionAlliances[player.faction + player.agenda] = { name: player.faction + ' / ' + player.agenda, wins: 0, losses: 0 };
             }
 
             var playerStat = players[player.name];
             var factionStat = factions[player.faction];
             var allianceStat = alliances[player.alliance];
-            var factionAgendaStat = factionAgendas[player.faction + player.agenda];
+            var factionAllianceStat = factionAlliances[player.faction + player.agenda];
 
             if(player.name === game.winner) {
                 playerStat.wins++;
                 factionStat.wins++;
                 allianceStat.wins++;
-                factionAgendaStat.wins++;
+                factionAllianceStat.wins++;
             } else {
                 playerStat.losses++;
                 factionStat.losses++;
                 allianceStat.losses++;
-                factionAgendaStat.losses++;
+                factionAllianceStat.losses++;
             }
         });
     });
@@ -110,17 +112,17 @@ gameRepository.getAllGames(args[0], args[1], (err, games) => {
         return - faction.winRate;
     });
 
-    let factionAgendaWinners = _.chain(factionAgendas).sortBy(faction => {
+    let factionAllianceWinners = _.chain(factionAlliances).sortBy(faction => {
         return -faction.wins;
     }).first(10).value();
 
-    let factionAgendaWinRates = _.map(factionAgendaWinners, faction => {
+    let factionAllianceWinRates = _.map(factionAllianceWinners, faction => {
         let games = faction.wins + faction.losses;
 
         return { name: faction.name, wins: faction.wins, losses: faction.losses, winRate: Math.round(((faction.wins / games) * 100)) };
     });
 
-    let factionAgendaWinRateStats = _.chain(factionAgendaWinRates).sortBy(faction => {
+    let factionAllianceWinRateStats = _.chain(factionAllianceWinRates).sortBy(faction => {
         return - faction.winRate;
     }).first(10).value();
 
@@ -142,11 +144,13 @@ gameRepository.getAllGames(args[0], args[1], (err, games) => {
         console.info(winner.name, ' | ', winner.wins, ' | ', winner.losses, ' | ', winner.winRate + '%');
     });
 
-    console.info('### Faction/Agenda combination win rates\n\nFaction/Agenda | Number of wins | Number of losses | Win Rate\n----|-------------|------------------|--------');
+    console.info('### Faction/Alliance combination win rates\n\nFaction/Alliance | Number of wins | Number of losses | Win Rate\n----|-------------|------------------|--------');
 
-    _.each(factionAgendaWinRateStats, winner => {
+    _.each(factionAllianceWinRateStats, winner => {
         console.info(winner.name, ' | ', winner.wins, ' | ', winner.losses, ' | ', winner.winRate + '%');
     });
 
     console.info(rejected);
-});
+})
+    .then(() => db.close())
+    .catch(() => db.close());

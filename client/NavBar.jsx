@@ -1,8 +1,10 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 import _ from 'underscore';
 import { connect } from 'react-redux';
 
 import Link from './Link.jsx';
+import Avatar from './Avatar.jsx';
 
 import * as actions from './actions';
 
@@ -42,7 +44,7 @@ class InnerNavBar extends React.Component {
 
             return (
                 <li key={ menuItem.name } className={ className }>
-                    <a href='#' className='dropdown-toggle' data-toggle='dropdown' role='button' aria-haspopup='true' aria-expanded='false'>{ menuItem.name }<span className='caret' /></a>
+                    <a href='#' className='dropdown-toggle' data-toggle='dropdown' role='button' aria-haspopup='true' aria-expanded='false'>{ menuItem.avatar ? <Avatar emailHash={ menuItem.emailHash } forceDefault={ menuItem.disableGravatar } /> : null }{ menuItem.name }<span className='caret' /></a>
                     <ul className='dropdown-menu'>
                         { childItems }
                     </ul>
@@ -73,7 +75,7 @@ class InnerNavBar extends React.Component {
         });
 
         return (
-            <nav className='navbar navbar-inverse navbar-fixed-top'>
+            <nav className='navbar navbar-inverse navbar-fixed-top no-highlight'>
                 <div className='container'>
                     <div className='navbar-header'>
                         <button className='navbar-toggle collapsed' type='button' data-toggle='collapse' data-target='#navbar' aria-expanded='false' aria-controls='navbar'>
@@ -101,12 +103,12 @@ class InnerNavBar extends React.Component {
 
 InnerNavBar.displayName = 'Decks';
 InnerNavBar.propTypes = {
-    context: React.PropTypes.array,
-    currentPath: React.PropTypes.string,
-    leftMenu: React.PropTypes.array,
-    numGames: React.PropTypes.number,
-    rightMenu: React.PropTypes.array,
-    title: React.PropTypes.string
+    context: PropTypes.array,
+    currentPath: PropTypes.string,
+    leftMenu: PropTypes.array,
+    numGames: PropTypes.number,
+    rightMenu: PropTypes.array,
+    title: PropTypes.string
 };
 
 function mapStateToProps(state) {
@@ -118,4 +120,3 @@ function mapStateToProps(state) {
 const NavBar = connect(mapStateToProps, actions)(InnerNavBar);
 
 export default NavBar;
-

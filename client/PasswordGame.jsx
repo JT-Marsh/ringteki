@@ -1,4 +1,5 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 import { connect } from 'react-redux';
 
 import AlertPanel from './SiteComponents/AlertPanel.jsx';
@@ -51,24 +52,24 @@ class InnerPasswordGame extends React.Component {
                     <div className='col-sm-6'>
                         <AlertPanel type='error' message={ this.props.passwordError } />
                     </div>
-                    : null }    
+                    : null }
                 <div className='col-sm-12'>
                     <div className='btn-group'>
                         <button className='btn btn-primary' onClick={ this.onJoinClick.bind(this) }>{ this.props.passwordJoinType }</button>
                         <button className='btn btn-primary' onClick={ this.onCancelClick.bind(this) }>Cancel</button>
                     </div>
-                </div>    
+                </div>
             </div>);
     }
 }
 
 InnerPasswordGame.displayName = 'PasswordGame';
 InnerPasswordGame.propTypes = {
-    cancelPasswordJoin: React.PropTypes.func,
-    passwordError: React.PropTypes.string,
-    passwordGame: React.PropTypes.object,
-    passwordJoinType: React.PropTypes.string,
-    socket: React.PropTypes.object
+    cancelPasswordJoin: PropTypes.func,
+    passwordError: PropTypes.string,
+    passwordGame: PropTypes.object,
+    passwordJoinType: PropTypes.string,
+    socket: PropTypes.object
 };
 
 function mapStateToProps(state) {

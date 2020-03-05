@@ -1,18 +1,18 @@
 const _ = require('underscore');
 
-const Game = require('../../../server/game/game.js');
-const Player = require('../../../server/game/player.js');
-const Spectator = require('../../../server/game/spectator.js');
+const Game = require('../../../build/server/game/game.js');
+const Player = require('../../../build/server/game/player.js');
+const Spectator = require('../../../build/server/game/spectator.js');
 
 describe('the Game', () => {
     var game = {};
-    var player1 = new Player('1', { username: 'Player 1' }, true, game);
-    var player2 = new Player('2', { username: 'Player 2' }, false, game);
+    var player1 = new Player('1', { username: 'Player 1', settings: {} }, true, game);
+    var player2 = new Player('2', { username: 'Player 2', settings: {} }, false, game);
     var spectator = new Spectator('3', 'Spectator 1');
 
     beforeEach(() => {
-        var gameRepository = jasmine.createSpyObj('gameRepository', ['save']);
-        game = new Game({ name: 'Test Game' }, { gameRepository: gameRepository });
+        var gameService = jasmine.createSpyObj('gameService', ['save']);
+        game = new Game({ name: 'Test Game' }, { gameService: gameService });
     });
 
     describe('getSummary function', () => {
@@ -57,7 +57,7 @@ describe('the Game', () => {
 
         describe('when a player has a deck selected', () => {
             beforeEach(() => {
-                player1.deck = { name: 'Test Deck'};
+                player1.deck = { name: 'Test Deck' };
                 game.playersAndSpectators[player1.name] = player1;
                 game.playersAndSpectators[player2.name] = player2;
             });
@@ -87,7 +87,7 @@ describe('the Game', () => {
                 game.playersAndSpectators[spectator.name] = spectator;
             });
 
-            it('should show the specators to any player', () => {
+            it('should show the spectators to any player', () => {
                 var state = game.getSummary('any');
 
                 expect(state.spectators).not.toBe(undefined);

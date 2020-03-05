@@ -1,27 +1,31 @@
-const Conflict = require('../../../server/game/conflict.js');
-const Player = require('../../../server/game/player.js');
-const DrawCard = require('../../../server/game/drawcard.js');
+const Conflict = require('../../../build/server/game/conflict.js');
+const Player = require('../../../build/server/game/player.js');
+const DrawCard = require('../../../build/server/game/drawcard.js');
 
 describe('Conflict', function() {
     beforeEach(function() {
-        this.gameSpy = jasmine.createSpyObj('game', ['applyGameAction', 'on', 'raiseEvent']);
+        this.gameSpy = jasmine.createSpyObj('game', ['applyGameAction', 'findAnyCardsInAnyList', 'on', 'raiseEvent', 'reapplyStateDependentEffects', 'getFrameworkContext']);
         this.gameSpy.applyGameAction.and.callFake((type, card, handler) => {
             handler(card);
         });
+        this.gameSpy.findAnyCardsInAnyList.and.returnValue([]);
+        this.effectEngineSpy = jasmine.createSpyObj('effectEngine', ['checkEffects']);
+        this.gameSpy.effectEngine = this.effectEngineSpy;
 
-        this.attackingPlayer = new Player('1', 'Player 1', true, this.gameSpy);
-        spyOn(this.attackingPlayer, 'winConflict');
-        this.defendingPlayer = new Player('2', 'Player 2', true, this.gameSpy);
-        spyOn(this.defendingPlayer, 'winConflict');
+        this.attackingPlayer = new Player('1', { username: 'Player 1', settings: {} }, true, this.gameSpy);
+        this.defendingPlayer = new Player('2', { username: 'Player 2', settings: {} }, true, this.gameSpy);
 
         this.attackerCard = new DrawCard(this.attackingPlayer, {});
         spyOn(this.attackerCard, 'getSkill').and.returnValue(5);
         this.defenderCard = new DrawCard(this.defendingPlayer, {});
         spyOn(this.defenderCard, 'getSkill').and.returnValue(3);
+        spyOn(this.attackerCard, 'canParticipateAsAttacker').and.returnValue(true);
+        spyOn(this.defenderCard, 'canParticipateAsDefender').and.returnValue(true);
 
         this.conflict = new Conflict(this.gameSpy, this.attackingPlayer, this.defendingPlayer, 'military');
         this.conflict.addAttackers([this.attackerCard]);
         this.conflict.addDefenders([this.defenderCard]);
+        this.conflict.calculateSkill();
     });
 
     describe('removeFromConflict()', function() {
@@ -33,11 +37,6 @@ describe('Conflict', function() {
             it('should remove the card from the attacker list', function() {
                 expect(this.conflict.attackers).not.toContain(this.attackerCard);
             });
-
-            it('should recalculate conflict skills', function() {
-                expect(this.conflict.attackerSkill).toBe(0);
-                expect(this.conflict.defenderSkill).toBe(3);
-            });
         });
 
         describe('when the card is a defender', function() {
@@ -47,11 +46,6 @@ describe('Conflict', function() {
 
             it('should remove the card from the defender list', function() {
                 expect(this.conflict.defenders).not.toContain(this.defenderCard);
-            });
-
-            it('should recalculate conflict skills', function() {
-                expect(this.conflict.attackerSkill).toBe(5);
-                expect(this.conflict.defenderSkill).toBe(0);
             });
         });
 

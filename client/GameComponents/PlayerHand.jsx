@@ -1,9 +1,10 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 import _ from 'underscore';
 import $ from 'jquery';
 
 import Card from './Card.jsx';
-import {tryParseJSON} from '../util.js';
+import { tryParseJSON } from '../util.js';
 
 class PlayerHand extends React.Component {
     onDragOver(event) {
@@ -38,36 +39,70 @@ class PlayerHand extends React.Component {
     }
 
     getCards(needsSquish) {
-        let cardIndex = 0;
         let handLength = this.props.cards ? this.props.cards.length : 0;
-        let requiredWidth = handLength * 64;
-        let overflow = requiredWidth - 342;
-        let offset = overflow / (handLength - 1);
+        let cardIndex = 1;
+        let cardWidth = this.getCardWidth();
+        let attachmentOffset = 13;
+        switch(this.props.cardSize) {
+            case 'large':
+                attachmentOffset *= 1.4;
+                break;
+            case 'small':
+                attachmentOffset *= 0.8;
+                break;
+            case 'x-large':
+                attachmentOffset *= 2;
+                break;
+        }
 
         let hand = _.map(this.props.cards, card => {
-            let left = (64 - offset) * cardIndex++;
-
             let style = {};
+            let className = '';
             if(needsSquish) {
-                style = {
-                    left: left + 'px'
-                };
+                className += ' squish';
+                if(cardIndex++ === handLength) {
+                    className += ' tail';
+                    if(attachmentOffset > (480 / (cardWidth * handLength))) {
+                        className += ' nohide';
+                    }
+                }
             }
 
-            return (<Card key={ card.uuid } card={ card } style={ style } disableMouseOver={ !this.props.isMe } source='hand'
+            return (<Card key={ card.uuid } card={ card } className={ className } style={ style } disableMouseOver={ !this.props.isMe } source='hand'
                 onMouseOver={ this.props.onMouseOver }
                 onMouseOut={ this.props.onMouseOut }
                 onClick={ this.props.onCardClick }
-                onDragDrop={ this.props.onDragDrop } />);
+                onDragDrop={ this.props.onDragDrop }
+                size={ this.props.cardSize } />);
         });
 
         return hand;
     }
 
+    getCardWidth() {
+        switch(this.props.cardSize) {
+            case 'small':
+                return 65 * 0.8;
+            case 'large':
+                return 65 * 1.4;
+            case 'x-large':
+                return 65 * 2;
+            case 'normal':
+            default:
+                return 65;
+        }
+    }
 
     render() {
         let className = 'panel hand';
-        let needsSquish = this.props.cards && this.props.cards.length * 64 > 342;
+
+        if(this.props.cardSize !== 'normal') {
+            className += ' ' + this.props.cardSize;
+        }
+
+        let cardWidth = this.getCardWidth();
+
+        let needsSquish = this.props.cards && this.props.cards.length * cardWidth > 480;
 
         if(needsSquish) {
             className += ' squish';
@@ -75,28 +110,31 @@ class PlayerHand extends React.Component {
 
         let cards = this.getCards(needsSquish);
 
-        return (
+        return (<div>
+            <grip>
+                <div className={ 'hand-title-bar no-highlight ' } >
+                    { 'Hand (' + cards.length + ')' }
+                </div>
+            </grip>
             <div className={ className }
                 onDragLeave={ this.onDragLeave }
                 onDragOver={ this.onDragOver }
                 onDrop={ event => this.onDragDrop(event, 'hand') }>
-                <div className='panel-header'>
-                    { 'Hand (' + cards.length + ')' }
-                </div>
                 { cards }
             </div>
-        );
+        </div>);
     }
 }
 
 PlayerHand.displayName = 'PlayerHand';
 PlayerHand.propTypes = {
-    cards: React.PropTypes.array,
-    isMe: React.PropTypes.bool,
-    onCardClick: React.PropTypes.func,
-    onDragDrop: React.PropTypes.func,
-    onMouseOut: React.PropTypes.func,
-    onMouseOver: React.PropTypes.func
+    cardSize: PropTypes.string,
+    cards: PropTypes.array,
+    isMe: PropTypes.bool,
+    onCardClick: PropTypes.func,
+    onDragDrop: PropTypes.func,
+    onMouseOut: PropTypes.func,
+    onMouseOver: PropTypes.func
 };
 
 export default PlayerHand;

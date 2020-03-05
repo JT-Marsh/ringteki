@@ -1,4 +1,5 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 import { findDOMNode } from 'react-dom';
 import { connect } from 'react-redux';
 import $ from 'jquery';
@@ -8,6 +9,7 @@ import AlertPanel from './SiteComponents/AlertPanel.jsx';
 import DeckRow from './DeckRow.jsx';
 import Messages from './GameComponents/Messages.jsx';
 import Avatar from './Avatar.jsx';
+import DeckStatus from './DeckStatus.jsx';
 
 import * as actions from './actions';
 
@@ -85,24 +87,14 @@ class InnerPendingGame extends React.Component {
 
         if(player && player.deck && player.deck.selected) {
             if(playerIsMe) {
-                deck = <span className='deck-selection'>{ player.deck.name }</span>;
-                selectLink = <span className='deck-link' data-toggle='modal' data-target='#decks-modal'>Select deck...</span>;
+                deck = <span className='deck-selection clickable' data-toggle='modal' data-target='#decks-modal'>{ player.deck.name }</span>;
             } else {
                 deck = <span className='deck-selection'>Deck Selected</span>;
             }
 
-            let statusClass = 'deck-status';
-            if(player.deck.status === 'Valid') {
-                statusClass += ' valid';
-            } else if(player.deck.status === 'Invalid') {
-                statusClass += ' invalid';
-            } else if(player.deck.status === 'Unreleased Cards') {
-                statusClass += ' unreleased';
-            }
-
-            status = <span className={ statusClass }>{ player.deck.status }</span>;
+            status = <DeckStatus status={ player.deck.status } />;
         } else if(player && playerIsMe) {
-            selectLink = <span className='deck-link' data-toggle='modal' data-target='#decks-modal'>Select deck...</span>;
+            selectLink = <span className='card-link' data-toggle='modal' data-target='#decks-modal'>Select deck...</span>;
         }
 
         return (
@@ -181,6 +173,17 @@ class InnerPendingGame extends React.Component {
         this.props.zoomCard(card);
     }
 
+    getClock() {
+        let game = this.props.currentGame;
+        if(!game.clocks || game.clocks.type === 'none') {
+            return;
+        }
+        if(game.clocks.type === 'byoyomi') {
+            return `Clock: ${game.clocks.time} mins + ${game.clocks.periods} x ${game.clocks.timePeriod} secs (byoyomi)`;
+        }
+        return 'Clock: ' + game.clocks.time + ' mins (' + (game.clocks.type) + ')';
+    }
+
     render() {
         if(this.props.currentGame && this.props.currentGame.started) {
             return <div>Loading game in progress, please wait...</div>;
@@ -203,6 +206,8 @@ class InnerPendingGame extends React.Component {
             }) : <div>You have no decks, please add one</div>;
         }
 
+        let game = this.props.currentGame;
+
         let popup = (
             <div id='decks-modal' ref='modal' className='modal fade' tabIndex='-1' role='dialog'>
                 <div className='modal-dialog' role='document'>
@@ -212,7 +217,7 @@ class InnerPendingGame extends React.Component {
                             <h4 className='modal-title'>Select Deck</h4>
                         </div>
                         <div className='modal-body'>
-                            <div className='deck-list'>
+                            <div className='deck-list-popup'>
                                 { decks }
                             </div>
                         </div>
@@ -226,60 +231,81 @@ class InnerPendingGame extends React.Component {
                     <source src='/sound/charge.mp3' type='audio/mpeg' />
                     <source src='/sound/charge.ogg' type='audio/ogg' />
                 </audio>
-                <div className='btn-group'>
-                    <button className='btn btn-primary' disabled={ !this.isGameReady() || this.props.connecting || this.state.waiting } onClick={ this.onStartClick }>Start</button>
-                    <button className='btn btn-primary' onClick={ this.onLeaveClick }>Leave</button>
+                <div className='panel-title text-center'>
+                    { this.props.currentGame.name }
                 </div>
-                <h3>{ this.props.currentGame.name }</h3>
-                <div>{ this.getGameStatus() }</div>
-                <div className='players'>
-                    <h3>Players</h3>
+                <div className='panel'>
+                    <div className='row-flex-box'>
+                        <div className='column-flex-box'>
+                            <div className='btn-group'>
+                                <button className='btn btn-primary' disabled={ !this.isGameReady() || this.props.connecting || this.state.waiting } onClick={ this.onStartClick }>Start</button>
+                                <button className='btn btn-primary' onClick={ this.onLeaveClick }>Leave</button>
+                            </div>
+                            <div className='game-status'>{ this.getGameStatus() }</div>
+                        </div>
+                        <div className='column-flex-box'>
+                            <div>
+                                { 'Spectators allowed: ' + (game.allowSpectators ? 'Yes' : 'No') }
+                            </div>
+                            <div>
+                                { game.allowSpectators ? 'Spectators can chat: ' + (game.spectatorSquelch ? 'No' : 'Yes') : null }
+                            </div>
+                            <div>
+                                { this.getClock() }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div className='panel-title text-center'>
+                    Players
+                </div>
+                <div className='players panel'>
                     {
                         _.map(this.props.currentGame.players, player => {
                             return this.getPlayerStatus(player, this.props.username);
                         })
                     }
                 </div>
-                <div className='spectators'>
-                    <h3>Spectators({ this.props.currentGame.spectators.length })</h3>
+                <div className='panel-title text-center'>
+                    Spectators({ this.props.currentGame.spectators.length })
+                </div>
+                <div className='spectators panel'>
                     { _.map(this.props.currentGame.spectators, spectator => {
                         return <div key={ spectator.name }>{ spectator.name }</div>;
                     }) }
                 </div>
-                <div className='chat-box'>
-                    <h3>Chat</h3>
+                <div className='panel-title text-center'>
+                    Chat</div>
+                <div className='chat-box panel'>
                     <div className='message-list'>
                         <Messages messages={ this.props.currentGame.messages } onCardMouseOver={ this.onMouseOver } onCardMouseOut={ this.onMouseOut } />
                     </div>
                     <form className='form form-hozitontal'>
                         <div className='form-group'>
-                            <div className='col-sm-10'>
-                                <input className='form-control' type='text' placeholder='Chat...' value={ this.state.message }
-                                    onKeyPress={ this.onKeyPress } onChange={ this.onChange } />
-                            </div>
-                            <button type='button' className='btn btn-primary col-sm-2' onClick={ this.onSendClick }>Send</button>
+                            <input className='form-control' type='text' placeholder='Enter a message...' value={ this.state.message }
+                                onKeyPress={ this.onKeyPress } onChange={ this.onChange } />
                         </div>
                     </form>
                 </div>
                 { popup }
-            </div>);
+            </div >);
     }
 }
 
 InnerPendingGame.displayName = 'PendingGame';
 InnerPendingGame.propTypes = {
-    apiError: React.PropTypes.string,
-    connecting: React.PropTypes.bool,
-    currentGame: React.PropTypes.object,
-    decks: React.PropTypes.array,
-    gameSocketClose: React.PropTypes.func,
-    host: React.PropTypes.string,
-    loadDecks: React.PropTypes.func,
-    loading: React.PropTypes.bool,
-    sendSocketMessage: React.PropTypes.func,
-    socket: React.PropTypes.object,
-    username: React.PropTypes.string,
-    zoomCard: React.PropTypes.func
+    apiError: PropTypes.string,
+    connecting: PropTypes.bool,
+    currentGame: PropTypes.object,
+    decks: PropTypes.array,
+    gameSocketClose: PropTypes.func,
+    host: PropTypes.string,
+    loadDecks: PropTypes.func,
+    loading: PropTypes.bool,
+    sendSocketMessage: PropTypes.func,
+    socket: PropTypes.object,
+    username: PropTypes.string,
+    zoomCard: PropTypes.func
 };
 
 function mapStateToProps(state) {
@@ -299,4 +325,3 @@ function mapStateToProps(state) {
 const PendingGame = connect(mapStateToProps, actions)(InnerPendingGame);
 
 export default PendingGame;
-

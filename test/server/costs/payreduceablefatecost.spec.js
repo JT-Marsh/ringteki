@@ -1,23 +1,25 @@
-const Costs = require('../../../server/game/costs.js');
+const Costs = require('../../../build/server/game/costs.js');
 
 describe('Costs.payReduceableFateCost', function() {
     beforeEach(function() {
         this.gameSpy = jasmine.createSpyObj('game', ['addMessage']);
-        this.playerSpy = jasmine.createSpyObj('player', ['getDuplicateInPlay', 'getReducedCost', 'markUsedReducers']);
-        this.cardSpy = { card: 1 };
+        this.playerSpy = jasmine.createSpyObj('player', ['getDuplicateInPlay', 'getMinimumCost', 'getReducedCost', 'markUsedReducers', 'checkRestrictions']);
+        this.playerSpy.checkRestrictions.and.returnValue(true);
+        this.cardSpy = { card: 1, allowGameAction: () => true };
         this.context = {
             costs: {},
             game: this.gameSpy,
             player: this.playerSpy,
-            source: this.cardSpy
+            source: this.cardSpy,
+            playType: 'playing-type'
         };
-        this.cost = Costs.payReduceableFateCost('playing-type');
+        this.cost = Costs.payReduceableFateCost();
     });
 
     describe('canPay()', function() {
         beforeEach(function() {
             this.playerSpy.fate = 4;
-            this.playerSpy.getReducedCost.and.returnValue(4);
+            this.playerSpy.getMinimumCost.and.returnValue(4);
         });
 
         it('should return true when all criteria are met', function() {
@@ -26,7 +28,7 @@ describe('Costs.payReduceableFateCost', function() {
 
         it('should check the cost properly', function() {
             this.cost.canPay(this.context);
-            expect(this.playerSpy.getReducedCost).toHaveBeenCalledWith('playing-type', this.cardSpy);
+            expect(this.playerSpy.getMinimumCost).toHaveBeenCalledWith('playing-type', this.context, null, false);
         });
 
         describe('when there is not enough fate', function() {
@@ -40,7 +42,7 @@ describe('Costs.payReduceableFateCost', function() {
         });
     });
 
-    describe('pay()', function() {
+    describe('payEvent()', function() {
         beforeEach(function() {
             this.playerSpy.fate = 4;
             this.playerSpy.getReducedCost.and.returnValue(3);
@@ -48,19 +50,11 @@ describe('Costs.payReduceableFateCost', function() {
 
         describe('when there is no duplicate in play', function() {
             beforeEach(function() {
-                this.cost.pay(this.context);
+                this.cost.payEvent(this.context);
             });
 
             it('should mark the fate cost as the reduced cost', function() {
                 expect(this.context.costs.fate).toBe(3);
-            });
-
-            it('should spend the players fate', function() {
-                expect(this.playerSpy.fate).toBe(1);
-            });
-
-            it('should mark any reducers as used', function() {
-                expect(this.playerSpy.markUsedReducers).toHaveBeenCalledWith('playing-type', this.cardSpy);
             });
         });
     });

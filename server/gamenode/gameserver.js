@@ -7,6 +7,7 @@ const https = require('https');
 const fs = require('fs');
 const config = require('config');
 
+const { detectBinary } = require('../util');
 const logger = require('../log.js');
 const ZmqSocket = require('./zmqsocket.js');
 const Game = require('../game/game.js');
@@ -14,7 +15,7 @@ const Socket = require('../socket.js');
 const version = require('../../version.js');
 
 if(config.sentryDsn) {
-    Raven.config(config.sentryDsn, { release: version }).install();
+    Raven.config(config.sentryDsn, { sendTimeout: 5, release: version }).install();
 }
 
 class GameServer {
@@ -38,6 +39,7 @@ class GameServer {
         this.zmqSocket.on('onGameSync', this.onGameSync.bind(this));
         this.zmqSocket.on('onFailedConnect', this.onFailedConnect.bind(this));
         this.zmqSocket.on('onCloseGame', this.onCloseGame.bind(this));
+        this.zmqSocket.on('onCardData', this.onCardData.bind(this));
 
         var server = undefined;
 
@@ -53,16 +55,14 @@ class GameServer {
             perMessageDeflate: false
         };
 
-        if(config.env !== 'production') {
-            options.path = '/' + (config.gameNode.name) + '/socket.io';
-        }
+        options.path = '/' + (config.gameNode.name) + '/socket.io';
 
         this.io = socketio(server, options);
         this.io.set('heartbeat timeout', 30000);
         this.io.use(this.handshake.bind(this));
 
-        if(config.env === 'production') {
-            this.io.set('origins', 'http://www.jigoku.online:* https://www.jigoku.online:* ');
+        if(config.gameNode.origin) {
+            this.io.set('origins', config.gameNode.origin);
         }
 
         this.io.on('connection', this.onConnection.bind(this));
@@ -98,13 +98,25 @@ class GameServer {
     handleError(game, e) {
         logger.error(e);
 
-        var debugData = {};
+        let gameState = game.getState();
+        let debugData = {};
 
-        debugData.game = game.getState();
+        if(e.message.includes('Maximum call stack')) {
+            debugData.badSerializaton = detectBinary(gameState);
+        } else {
+            debugData.game = gameState;
+            debugData.game.players = undefined;
 
-        _.each(game.getPlayers(), player => {
-            debugData[player.name] = player.getState(player);
-        });
+            debugData.messages = game.messages;
+            debugData.game.messages = undefined;
+
+            debugData.pipeline = game.pipeline.getDebugInfo();
+            debugData.effectEngine = game.effectEngine.getDebugInfo();
+
+            _.each(game.getPlayers(), player => {
+                debugData[player.name] = player.getState(player);
+            });
+        }
 
         Raven.captureException(e, { extra: debugData });
 
@@ -140,7 +152,6 @@ class GameServer {
             if(player.left || player.disconnected || !player.socket) {
                 return;
             }
-
             player.socket.send('gamestate', game.getState(player.name));
         });
     }
@@ -165,7 +176,7 @@ class GameServer {
     }
 
     onStartGame(pendingGame) {
-        var game = new Game(pendingGame, { router: this });
+        let game = new Game(pendingGame, { router: this, shortCardData: this.shortCardData });
         this.games[pendingGame.id] = game;
 
         game.started = true;
@@ -225,6 +236,11 @@ class GameServer {
 
         delete this.games[gameId];
         this.zmqSocket.send('GAMECLOSED', { game: game.id });
+    }
+
+    onCardData(cardData) {
+        this.titleCardData = cardData.titleCardData;
+        this.shortCardData = cardData.shortCardData;
     }
 
     onConnection(ioSocket) {
@@ -337,6 +353,7 @@ class GameServer {
         }
 
         this.runAndCatchErrors(game, () => {
+            game.stopClocks();
             game[command](socket.user.username, ...args);
 
             game.continue();

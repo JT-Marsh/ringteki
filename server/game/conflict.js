@@ -1,62 +1,161 @@
 const _ = require('underscore');
+const GameObject = require('./GameObject');
 const Player = require('./player.js');
-const EventRegistrar = require('./eventregistrar.js');
+const Settings = require('../settings.js');
+const { CardTypes, EffectNames, EventNames, Locations } = require('./Constants');
 
-class Conflict {
-    constructor(game, attackingPlayer, defendingPlayer, conflictType) {
-        this.game = game;
+class Conflict extends GameObject {
+    constructor(game, attackingPlayer, defendingPlayer, ring = null, conflictProvince = null, forcedDeclaredType = null) {
+        super(game, 'Conflict');
         this.attackingPlayer = attackingPlayer;
         this.isSinglePlayer = !defendingPlayer;
         this.defendingPlayer = defendingPlayer || this.singlePlayerDefender();
-        this.conflictType = conflictType;
+        this.forcedDeclaredType = forcedDeclaredType;
+        this.declaredRing = this.ring = ring;
+        this.declaredType = null;
+        this.declarationComplete = false;
+        this.defendersChosen = false;
+        this.conflictProvince = conflictProvince;
+        this.conflictPassed = false;
+        this.conflictTypeSwitched = false;
+        this.conflictUnopposed = false;
+        this.winnerGoesStraightToNextConflict = false;
+        this.attackerCardsPlayed = [];
+        this.defenderCardsPlayed = [];
         this.attackers = [];
         this.attackerSkill = 0;
-        this.attackerSkillModifier = 0;
         this.defenders = [];
         this.defenderSkill = 0;
-        this.defenderSkillModifier = 0;
-        this.events = new EventRegistrar(game, this);
-        this.registerEvents(['onCardLeftPlay']);
+    }
+
+    get conflictType() {
+        return this.ring ? this.ring.conflictType : '';
+    }
+
+    get element() {
+        return this.ring ? this.ring.element : '';
+    }
+
+    get maxAllowedDefenders() {
+        let effects = this.getEffects(EffectNames.RestrictNumberOfDefenders);
+        return effects.length === 0 ? -1 : Math.min(...effects);
+    }
+
+    getSummary() {
+        let effects = this.getEffects(EffectNames.ForceConflictUnopposed);
+        let forcedUnopposed = effects.length !== 0;
+        return {
+            attackingPlayerId: this.attackingPlayer.id,
+            defendingPlayerId: this.defendingPlayer.id,
+            attackerSkill: this.attackerSkill,
+            defenderSkill: this.defenderSkill,
+            type: this.conflictType,
+            elements: this.elements,
+            attackerWins: this.attackers.length > 0 && this.attackerSkill >= this.defenderSkill,
+            breaking: this.conflictProvince && (this.conflictProvince.getStrength() - (this.attackerSkill - this.defenderSkill) <= 0),
+            unopposed: !(this.defenders && this.defenders.length > 0 && !forcedUnopposed),
+            declarationComplete: this.declarationComplete,
+            defendersChosen: this.defendersChosen
+        };
+    }
+
+    setDeclarationComplete(value) {
+        this.declarationComplete = value;
+    }
+
+    setDefendersChosen(value) {
+        this.defendersChosen = value;
     }
 
     singlePlayerDefender() {
-        var dummyPlayer = new Player('', { name: 'Dummy Player' }, false, this.game);
+        let dummyPlayer = new Player('', Settings.getUserWithDefaultsSet({ username: 'Dummy Player' }), false, this.game);
         dummyPlayer.initialise();
-        dummyPlayer.startPlotPhase();
         return dummyPlayer;
     }
 
     resetCards() {
         this.attackingPlayer.resetForConflict();
         this.defendingPlayer.resetForConflict();
-    }
-
-    initiateConflict() {
-        this.attackingPlayer.initiateConflict(this.conflictType);
+        if(this.conflictProvince) {
+            this.conflictProvince.inConflict = false;
+        }
     }
 
     addAttackers(attackers) {
-        this.attackers = this.attackers.concat(attackers);
-        this.markAsParticipating(attackers, 'attacker');
-        this.calculateSkill();
+        attackers = _.reject(attackers, card => this.isAttacking(card));
+        if(attackers.length > 0) {
+            this.attackers = this.attackers.concat(attackers);
+            this.markAsParticipating(attackers);
+        }
     }
 
     addAttacker(attacker) {
+        if(this.attackers.includes(attacker)) {
+            return;
+        }
         this.attackers.push(attacker);
-        this.markAsParticipating([attacker], 'attacker');
-        this.calculateSkill();
+        this.markAsParticipating([attacker]);
     }
 
     addDefenders(defenders) {
-        this.defenders = this.defenders.concat(defenders);
-        this.markAsParticipating(defenders, 'defender');
-        this.calculateSkill();
+        defenders = _.reject(defenders, card => this.isDefending(card));
+        if(defenders.length > 0) {
+            this.defenders = this.defenders.concat(defenders);
+            this.markAsParticipating(defenders);
+        }
     }
 
     addDefender(defender) {
+        if(this.defenders.includes(defender)) {
+            return;
+        }
         this.defenders.push(defender);
-        this.markAsParticipating([defender], 'defender');
-        this.calculateSkill();
+        this.markAsParticipating([defender]);
+    }
+
+
+    hasElement(element) {
+        return this.elements.includes(element);
+    }
+
+    get elements() {
+        return this.ring ? this.ring.getElements() : [];
+    }
+
+    get elementsToResolve() {
+        return this.sumEffects(EffectNames.ModifyConflictElementsToResolve) + 1;
+    }
+
+    switchType() {
+        this.ring.flipConflictType();
+        this.conflictTypeSwitched = true;
+    }
+
+    switchElement(element) {
+        let newRing = this.game.rings[element];
+        if(!newRing) {
+            throw new Error('switchElement called for non-existant element');
+        }
+        if(this.attackingPlayer.allowGameAction('takeFateFromRings') && newRing.fate > 0) {
+            this.game.addMessage('{0} takes {1} fate from {2}', this.attackingPlayer, newRing.fate, newRing);
+            this.attackingPlayer.modifyFate(newRing.fate);
+            newRing.fate = 0;
+        }
+        if(newRing.conflictType !== this.conflictType) {
+            newRing.flipConflictType();
+        }
+        this.ring.resetRing();
+        newRing.contested = true;
+        this.ring = newRing;
+    }
+
+    checkForIllegalParticipants() {
+        let illegal = this.attackers.filter(card => !card.canParticipateAsAttacker(this.conflictType));
+        illegal = illegal.concat(this.defenders.filter(card => !card.canParticipateAsDefender(this.conflictType)));
+        if(illegal.length > 0) {
+            this.game.addMessage('{0} cannot participate in the conflict any more and {1} sent home bowed', illegal, illegal.length > 1 ? 'are' : 'is');
+            this.game.applyGameAction(null, { sendHome: illegal, bow: illegal });
+        }
     }
 
     removeFromConflict(card) {
@@ -64,8 +163,6 @@ class Conflict {
         this.defenders = _.reject(this.defenders, c => c === card);
 
         card.inConflict = false;
-
-        this.calculateSkill();
     }
 
     markAsParticipating(cards) {
@@ -87,8 +184,11 @@ class Conflict {
     }
 
     anyParticipants(predicate) {
-        let participants = this.attackers.concat(this.defenders);
-        return _.any(participants, predicate);
+        return this.attackers.concat(this.defenders).some(predicate);
+    }
+
+    getParticipants(predicate = () => true) {
+        return this.attackers.concat(this.defenders).filter(predicate);
     }
 
     getNumberOfParticipants(predicate) {
@@ -102,47 +202,127 @@ class Conflict {
         }, 0);
     }
 
-    calculateSkill() {
+    getNumberOfParticipantsFor(player, predicate) {
+        if(player === 'attacker') {
+            player = this.attackingPlayer;
+        } else if(player === 'defender') {
+            player = this.defendingPlayer;
+        }
+        let characters = this.getCharacters(player);
+        if(predicate) {
+            return characters.filter(predicate).length;
+        }
+        return characters.length + player.sumEffects(EffectNames.AdditionalCharactersInConflict);
+    }
+
+    hasMoreParticipants(player, predicate) {
+        if(!player) {
+            return false;
+        }
+        if(!player.opponent) {
+            return !!this.getNumberOfParticipantsFor(player, predicate);
+        }
+        return this.getNumberOfParticipantsFor(player) > this.getNumberOfParticipantsFor(player.opponent);
+    }
+
+    addCardPlayed(player, card) {
+        if(player === this.attackingPlayer) {
+            this.attackerCardsPlayed.push(card.createSnapshot());
+        } else {
+            this.defenderCardsPlayed.push(card.createSnapshot());
+        }
+    }
+
+    getCardsPlayed(player, predicate = () => true) {
+        if(player === this.attackingPlayer) {
+            return this.attackerCardsPlayed.filter(predicate);
+        }
+        return this.defenderCardsPlayed.filter(predicate);
+    }
+
+    getNumberOfCardsPlayed(player, predicate) {
+        if(!player) {
+            return 0;
+        }
+        if(predicate) {
+            return this.getCardsPlayed(player, predicate).length;
+        }
+        return player.sumEffects(EffectNames.AdditionalCardPlayed) + this.getCardsPlayed(player).length;
+    }
+
+    calculateSkill(prevStateChanged = false) {
+        let stateChanged = this.game.effectEngine.checkEffects(prevStateChanged);
+
         if(this.winnerDetermined) {
-            return;
+            return stateChanged;
         }
 
-        this.attackerSkill = this.calculateSkillFor(this.attackers) + this.attackerSkillModifier;
-        this.defenderSkill = this.calculateSkillFor(this.defenders) + this.defenderSkillModifier;
+        const contributingLocations = [
+            Locations.PlayArea,
+            Locations.ProvinceOne,
+            Locations.ProvinceTwo,
+            Locations.ProvinceThree,
+            Locations.ProvinceFour,
+            Locations.StrongholdProvince
+        ];
+
+        let additionalContributingCards = this.game.findAnyCardsInAnyList(card =>
+            card.type === CardTypes.Character &&
+            contributingLocations.includes(card.location) &&
+            card.anyEffect(EffectNames.ContributeToConflict)
+        );
+
+        if(this.attackingPlayer.anyEffect(EffectNames.SetConflictTotalSkill)) {
+            this.attackerSkill = this.attackingPlayer.mostRecentEffect(EffectNames.SetConflictTotalSkill);
+        } else {
+            let additionalAttackers = additionalContributingCards
+                .filter(card => card.getEffects(EffectNames.ContributeToConflict).some(value => value === this.attackingPlayer));
+            this.attackerSkill = this.calculateSkillFor(this.attackers.concat(additionalAttackers)) + this.attackingPlayer.skillModifier;
+            if(this.attackingPlayer.imperialFavor === this.conflictType && this.attackers.length > 0) {
+                this.attackerSkill++;
+            }
+        }
+
+        if(this.defendingPlayer.anyEffect(EffectNames.SetConflictTotalSkill)) {
+            this.defenderSkill = this.defendingPlayer.mostRecentEffect(EffectNames.SetConflictTotalSkill);
+        } else {
+            let additionalDefenders = additionalContributingCards
+                .filter(card => card.getEffects(EffectNames.ContributeToConflict).some(value => value === this.defendingPlayer));
+            this.defenderSkill = this.calculateSkillFor(this.defenders.concat(additionalDefenders)) + this.defendingPlayer.skillModifier;
+            if(this.defendingPlayer.imperialFavor === this.conflictType && this.defenders.length > 0) {
+                this.defenderSkill++;
+            }
+        }
+
+        return stateChanged;
     }
 
     calculateSkillFor(cards) {
-        return _.reduce(cards, (sum, card) => {
-            return sum + card.getSkill(this.conflictType);
+        let skillFunction = this.mostRecentEffect(EffectNames.ChangeConflictSkillFunction) || (card => card.getContributionToConflict(this.conflictType));
+        let cannotContributeFunctions = this.getEffects(EffectNames.CannotContribute);
+        return cards.reduce((sum, card) => {
+            let cannotContribute = card.bowed;
+            if(!cannotContribute) {
+                cannotContribute = cannotContributeFunctions.some(func => func(card));
+            }
+            if(cannotContribute) {
+                return sum;
+            }
+            return sum + skillFunction(card);
         }, 0);
     }
 
-    modifyAttackerSkill(value) {
-        this.attackerSkillModifier += value;
-        this.calculateSkill();
-    }
-
-    modifyDefenderSkill(value) {
-        this.defenderSkillModifier += value;
-        this.calculateSkill();
-    }
-
     determineWinner() {
+        this.calculateSkill();
         this.winnerDetermined = true;
 
-        this.calculateSkill();
-
-        let result = this.checkNoWinnerOrLoser();
-        if(result.noWinner) {
-            this.noWinnerMessage = result.message;
+        if(this.attackerSkill === 0 && this.defenderSkill === 0) {
             this.loser = undefined;
             this.winner = undefined;
             this.loserSkill = this.winnerSkill = 0;
             this.skillDifference = 0;
-
             return;
         }
-
         if(this.attackerSkill >= this.defenderSkill) {
             this.loser = this.defendingPlayer;
             this.loserSkill = this.defenderSkill;
@@ -155,88 +335,30 @@ class Conflict {
             this.winnerSkill = this.defenderSkill;
         }
 
-        this.winner.winConflict(this.conflictType, this.attackingPlayer === this.winner);
-        this.loser.loseConflict(this.conflictType, this.attackingPlayer === this.loser);
         this.skillDifference = this.winnerSkill - this.loserSkill;
-    }
-
-    checkNoWinnerOrLoser() {
-        const noWinnerRules = [
-            {
-                condition: () => this.attackerSkill === 0 && this.defenderSkill === 0,
-                message: 'There is no winner or loser for this conflict because the attacker skill is 0'
-            },
-            {
-                condition: () => this.attackerSkill >= this.defenderSkill && this.attackingPlayer.cannotWinConflict,
-                message: 'There is no winner or loser for this conflict because the attacker cannot win'
-            },
-            {
-                condition: () => this.attackerSkill >= this.defenderSkill && this.attackers.length === 0,
-                message: 'There is no winner or loser for this conflict because the attacker has no participants'
-            },
-            {
-                condition: () => this.defenderSkill > this.attackerSkill && this.defendingPlayer.cannotWinConflict,
-                message: 'There is no winner or loser for this conflict because the defender cannot win'
-            },
-            {
-                condition: () => this.defenderSkill > this.attackerSkill && this.defenders.length === 0,
-                message: 'There is no winner or loser for this conflict because the defender has no participants'
-            }
-        ];
-
-        return _.chain(noWinnerRules)
-            .map(rule => ({ noWinner: !!rule.condition(), message: rule.message }))
-            .find(match => match.noWinner)
-            .value() || { noWinner: false };
     }
 
     isAttackerTheWinner() {
         return this.winner === this.attackingPlayer;
     }
 
-    isUnopposed() {
-        return this.loserSkill <= 0 && this.winnerSkill > 0;
-    }
-
-    getWinnerCards() {
-        if(this.winner === this.attackingPlayer) {
-            return this.attackers;
-        } else if(this.winner === this.defendingPlayer) {
-            return this.defenders;
+    getCharacters(player) {
+        if(!player) {
+            return [];
         }
-
-        return [];
+        return this.attackingPlayer === player ? this.attackers : this.defenders;
     }
 
-    getOpponentCards(player) {
-        return this.attackingPlayer === player ? this.defenders : this.attackers;
-    }
-
-    onCardLeftPlay(event) {
-        if(!this.winnerDetermined) {
-            this.removeFromConflict(event.card);
+    passConflict(message = '{0} has chosen to pass their conflict opportunity') {
+        this.game.addMessage(message, this.attackingPlayer);
+        this.conflictPassed = true;
+        if(this.ring) {
+            this.ring.resetRing();
         }
-    }
-
-    registerEvents(events) {
-        this.events.register(events);
-    }
-
-    unregisterEvents() {
-        this.events.unregisterAll();
-    }
-
-    finish() {
-        _.each(this.attackers, card => card.inConflict = false);
-        _.each(this.defenders, card => card.inConflict = false);
-    }
-
-    cancelConflict() {
-        this.cancelled = true;
-
+        this.game.recordConflict(this);
+        this.game.currentConflict = null;
+        this.game.raiseEvent(EventNames.OnConflictPass, { conflict: this });
         this.resetCards();
-
-        this.game.addMessage('{0}\'s {1} conflict is cancelled', this.attackingPlayer, this.conflictType);
     }
 }
 

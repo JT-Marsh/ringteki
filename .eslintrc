@@ -1,6 +1,22 @@
 {
-  "extends": "eslint:recommended",
+  "plugins": [
+    "jasmine"
+  ],
+  "env": {
+    "node": true,
+    "es6": true,
+    "jasmine": true
+  },
+  "extends": [
+    "eslint:recommended",
+    "plugin:jasmine/recommended"
+  ],
   "rules": {
+    "jasmine/no-spec-dupes": 0,
+    "jasmine/no-suite-dupes": 0,
+    "jasmine/missing-expect": 1,
+    "jasmine/new-line-before-expect": 0,
+    "jasmine/prefer-toHaveBeenCalledWith": 0,
     "indent": [
       2,
       4,
@@ -109,6 +125,9 @@
           }
         }
       }
+    ],
+    "no-trailing-spaces": [
+      2
     ]
   },
   "parser": "babel-eslint"

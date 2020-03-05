@@ -1,9 +1,9 @@
-/*global grecaptcha */
-
 import React from 'react';
+import PropTypes from 'prop-types';
 import _ from 'underscore';
 import $ from 'jquery';
 import {connect} from 'react-redux';
+import ReCAPTCHA from 'react-google-recaptcha';
 
 import AlertPanel from './SiteComponents/AlertPanel.jsx';
 
@@ -17,16 +17,13 @@ class InnerForgotPassword extends React.Component {
             error: '',
             username: '',
             password: '',
+            captcha: '',
             validation: {}
         };
 
         this.onChange = this.onChange.bind(this);
         this.verifyUsername = this.verifyUsername.bind(this);
         this.onSubmit = this.onSubmit.bind(this);
-    }
-
-    componentDidMount() {
-        grecaptcha.render('captcha', { sitekey: '6LfELhMUAAAAAKbD2kLd6OtbsBbrZJFs7grwOREZ', theme: 'dark' });
     }
 
     onChange(field, event) {
@@ -48,10 +45,12 @@ class InnerForgotPassword extends React.Component {
         this.setState({ validation: validation });
     }
 
+    onCaptchaChange(value) {
+        this.setState({ captcha: value });
+    }
+
     onSubmit(event) {
         event.preventDefault();
-
-        var response = grecaptcha.getResponse();
 
         this.setState({ error: '' });
 
@@ -69,7 +68,7 @@ class InnerForgotPassword extends React.Component {
         $.ajax({
             url: '/api/account/password-reset',
             type: 'POST',
-            data: JSON.stringify({ username: this.state.username, captcha: response }),
+            data: JSON.stringify({ username: this.state.username, captcha: this.state.captcha }),
             contentType: 'application/json'
         }).done((data) => {
             this.setState({ submitting: false });
@@ -79,7 +78,7 @@ class InnerForgotPassword extends React.Component {
                 return;
             }
 
-            this.setState({ success: 'Your request was submitted, if you have an account, an email will have been sent to the address you used to register with more instructions' });
+            this.setState({ success: 'Your request was submitted, if you have an account, an email will have been sent to the address you used to register with more instructions. This request could end up in your Spam folder, so make sure to check there if you do not see it.' });
         }).fail(() => {
             this.setState({ submitting: false });
 
@@ -114,7 +113,7 @@ class InnerForgotPassword extends React.Component {
             fieldsToRender.push(
                 <div key={ field.name } className={ className }>
                     <label htmlFor={ field.name } className='col-sm-2 control-label'>{ field.label }</label>
-                    <div className='col-sm-3'>
+                    <div className='col-sm-6'>
                         <input type={ field.inputType }
                             ref={ field.name }
                             className='form-control'
@@ -136,29 +135,37 @@ class InnerForgotPassword extends React.Component {
             <div>
                 { errorBar }
                 <AlertPanel type='info' message='To start the password recovery process, please enter your username and click the submit button.' />
-                <form className='form form-horizontal'>
-                    { fieldsToRender }
-                    <div className='form-group'>
-                        <div id='captcha' className='g-recaptcha col-sm-offset-2 col-sm-3' />
+                <div className='col-sm-6 col-sm-offset-3'>
+                    <div className='panel-title'>
+                    Forgot password
                     </div>
-                    <div className='form-group'>
-                        <div className='col-sm-offset-2 col-sm-3'>
-                            { this.state.submitting ? <button type='submit' className='btn btn-primary' disabled>Submitting...</button> :
-                                <button ref='submit' type='submit' className='btn btn-primary' onClick={ this.onSubmit }>Submit</button>
-                            }
-                        </div>
+                    <div className='panel'>
+                        <form className='form form-horizontal'>
+                            { fieldsToRender }
+                            <div className='form-group'>
+                                <div className='col-sm-offset-2 col-sm-3'>
+                                    <ReCAPTCHA ref='recaptcha' sitekey='6LdioDEUAAAAAH1lkMBCcE7mW3vRudleb9weuT8U' theme='dark' onChange={ this.onCaptchaChange.bind(this) } />
+                                </div>
+                            </div>
+                            <div className='form-group'>
+                                <div className='col-sm-offset-2 col-sm-3'>
+                                    { this.state.submitting ? <button type='submit' className='btn btn-primary' disabled>Submitting...</button> :
+                                        <button ref='submit' type='submit' className='btn btn-primary' onClick={ this.onSubmit }>Submit</button>
+                                    }
+                                </div>
+                            </div>
+                        </form>
                     </div>
-
-                </form>
+                </div>
             </div>);
     }
 }
 
 InnerForgotPassword.displayName = 'ForgotPassword';
 InnerForgotPassword.propTypes = {
-    login: React.PropTypes.func,
-    navigate: React.PropTypes.func,
-    socket: React.PropTypes.object
+    login: PropTypes.func,
+    navigate: PropTypes.func,
+    socket: PropTypes.object
 };
 
 function mapStateToProps(state) {

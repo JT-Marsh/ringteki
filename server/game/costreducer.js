@@ -6,25 +6,41 @@ class CostReducer {
         this.source = source;
         this.uses = 0;
         this.limit = properties.limit;
-        this.match = properties.match;
+        this.cardType = properties.cardType;
+        this.match = properties.match || (() => true);
+        this.targetCondition = properties.targetCondition;
         this.amount = properties.amount || 1;
-        this.playingTypes = _.isArray(properties.playingTypes) ? properties.playingTypes : [properties.playingTypes];
+        this.playingTypes = properties.playingTypes && (_.isArray(properties.playingTypes) ? properties.playingTypes : [properties.playingTypes]);
         if(this.limit) {
             this.limit.registerEvents(game);
         }
     }
 
-    canReduce(playingType, card) {
-        if(this.limit && this.limit.isAtMax()) {
+    canReduce(playingType, card, target = null, ignoreType = false) {
+        if(this.limit && this.limit.isAtMax(this.source.controller)) {
+            return false;
+        } else if(!ignoreType && this.cardType && card.getType() !== this.cardType) {
+            return false;
+        } else if(this.playingTypes && !this.playingTypes.includes(playingType)) {
+            return false;
+        }
+        return this.match(card, this.source) && this.checkTargetCondition(target);
+    }
+
+    checkTargetCondition(target) {
+        if(!this.targetCondition) {
+            return true;
+        }
+        if(!target) {
             return false;
         }
 
-        return this.playingTypes.includes(playingType) && !!this.match(card);
+        return this.targetCondition(target, this.source);
     }
 
-    getAmount(card) {
+    getAmount(card, player) {
         if(_.isFunction(this.amount)) {
-            return this.amount(card);
+            return this.amount(card, player);
         }
 
         return this.amount;
@@ -32,12 +48,12 @@ class CostReducer {
 
     markUsed() {
         if(this.limit) {
-            this.limit.increment();
+            this.limit.increment(this.source.controller);
         }
     }
 
     isExpired() {
-        return !!this.limit && this.limit.isAtMax() && !this.limit.isRepeatable();
+        return !!this.limit && this.limit.isAtMax(this.source.controller) && !this.limit.isRepeatable();
     }
 
     unregisterEvents() {

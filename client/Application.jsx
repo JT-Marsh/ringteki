@@ -1,4 +1,5 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 import $ from 'jquery';
 import _ from 'underscore';
 import { bindActionCreators } from 'redux';
@@ -13,18 +14,22 @@ import Decks from './Decks.jsx';
 import AddDeck from './AddDeck.jsx';
 import EditDeck from './EditDeck.jsx';
 import NotFound from './NotFound.jsx';
+import ErrorBoundary from './SiteComponents/ErrorBoundary.jsx';
 import NavBar from './NavBar.jsx';
 import GameLobby from './GameLobby.jsx';
 import GameBoard from './GameBoard.jsx';
+import HowToPlay from './HowToPlay.jsx';
 import About from './About.jsx';
+import Community from './Community.jsx';
 import ForgotPassword from './ForgotPassword.jsx';
 import ResetPassword from './ResetPassword.jsx';
 import Profile from './Profile.jsx';
 import NewsAdmin from './NewsAdmin.jsx';
 import Unauthorised from './Unauthorised.jsx';
 import UserAdmin from './UserAdmin.jsx';
+import BlockList from './BlockList.jsx';
 
-import {toastr} from 'react-redux-toastr';
+import { toastr } from 'react-redux-toastr';
 
 import version from '../version.js';
 
@@ -42,9 +47,11 @@ class App extends React.Component {
             '/register': () => <Register />,
             '/decks': () => <Decks { ...boundActionCreators } />,
             '/decks/add': () => <AddDeck />,
-            '/decks/edit': params => <EditDeck deckId={ params.deckId }/>,
+            '/decks/edit': params => <EditDeck deckId={ params.deckId } />,
             '/play': () => (this.props.currentGame && this.props.currentGame.started) ? <GameBoard /> : <GameLobby />,
+            '/how-to-play': () => <HowToPlay />,
             '/about': () => <About />,
+            '/community': () => <Community />,
             '/forgot': () => <ForgotPassword />,
             '/reset-password': params => <ResetPassword id={ params.id } token={ params.token } />,
             '/profile': () => <Profile />,
@@ -71,7 +78,7 @@ class App extends React.Component {
         let socket = io.connect(window.location.origin, {
             reconnection: true,
             reconnectionDelay: 1000,
-            reconnectionDelayMax : 5000,
+            reconnectionDelayMax: 5000,
             reconnectionAttempts: Infinity,
             query: queryString
         });
@@ -127,13 +134,19 @@ class App extends React.Component {
                 url += ':' + server.port;
             }
 
+            this.props.onGameHandoffReceived(server);
+
+            if(this.props.gameSocket && this.props.currentGameId !== server.gameId) {
+                this.props.closeGameSocket();
+            }
+
             this.props.gameSocketConnecting(url + '/' + server.name);
 
             let gameSocket = io.connect(url, {
                 path: '/' + server.name + '/socket.io',
                 reconnection: true,
                 reconnectionDelay: 1000,
-                reconnectionDelayMax : 5000,
+                reconnectionDelayMax: 5000,
                 reconnectionAttempts: 5,
                 query: this.props.token ? 'token=' + this.props.token : undefined
             });
@@ -204,20 +217,35 @@ class App extends React.Component {
     }
 
     render() {
-        let notAuthedMenu = [
-            { name: 'Login', path: '/login' },
-            { name: 'Register', path: '/register' }
-        ];
+        let rightMenu;
 
-        let authedMenu = [
-            { name: 'Profile', path: '/profile' },
-            { name: 'Logout', path: '/logout' }
-        ];
+        if(!this.props.user) {
+            rightMenu = [
+                { name: 'Login', path: '/login' },
+                { name: 'Register', path: '/register' }
+            ];
+        } else {
+            rightMenu = [
+                {
+                    name: this.props.user.username, childItems: [
+                        { name: 'Profile', path: '/profile' },
+                        { name: 'Block List', path: '/blocklist' },
+                        { name: 'Logout', path: '/logout' }
+                    ], avatar: true, emailHash: this.props.user.emailHash, disableGravatar: this.props.user.settings.disableGravatar
+                }
+            ];
+        }
 
         let leftMenu = [
             { name: 'Decks', path: '/decks' },
             { name: 'Play', path: '/play' },
-            { name: 'About', path: '/about' }
+            {
+                name: 'Help', childItems: [
+                    { name: 'How To Play', path: '/how-to-play' },
+                    { name: 'About', path: '/about' },
+                    { name: 'Community', path: '/community' }
+                ]
+            }
         ];
 
         let adminMenuItems = [];
@@ -239,7 +267,6 @@ class App extends React.Component {
             leftMenu.push({ name: 'Admin', childItems: adminMenuItems });
         }
 
-        let rightMenu = this.props.loggedIn ? authedMenu : notAuthedMenu;
         let component = {};
 
         let path = this.props.path;
@@ -263,6 +290,7 @@ class App extends React.Component {
         let idArg;
         let tokenArg;
         let index;
+        let gameBoardVisible = false;
 
         index = path.indexOf('/reset-password');
         if(index !== -1) {
@@ -292,13 +320,25 @@ class App extends React.Component {
                 component = <AddDeck />;
                 break;
             case '/decks/edit':
-                component = <EditDeck deckId={ arg }/>;
+                component = <EditDeck deckId={ arg } />;
                 break;
             case '/play':
-                component = (this.props.currentGame && this.props.currentGame.started) ? <GameBoard /> : <GameLobby />;
+                if(this.props.currentGame && this.props.currentGame.started) {
+                    component = <GameBoard />;
+                    gameBoardVisible = true;
+                } else {
+                    component = <GameLobby />;
+                }
+
+                break;
+            case '/how-to-play':
+                component = <HowToPlay />;
                 break;
             case '/about':
                 component = <About />;
+                break;
+            case '/community':
+                component = <Community />;
                 break;
             case '/forgot':
                 component = <ForgotPassword />;
@@ -328,15 +368,56 @@ class App extends React.Component {
                 }
 
                 break;
+            case '/blocklist':
+                component = <BlockList />;
+                break;
             default:
                 component = <NotFound />;
                 break;
         }
 
-        return (<div>
+        let backgroundClass = 'bg';
+        if(gameBoardVisible && this.props.user) {
+            switch(this.props.user.settings.background) {
+                case 'CRAB':
+                    backgroundClass = 'bg-board-crab';
+                    break;
+                case 'CRANE':
+                    backgroundClass = 'bg-board-crane';
+                    break;
+                case 'DRAGON':
+                    backgroundClass = 'bg-board-dragon';
+                    break;
+                case 'LION':
+                    backgroundClass = 'bg-board-lion';
+                    break;
+                case 'MANTIS':
+                    backgroundClass = 'bg-board-mantis';
+                    break;
+                case 'PHOENIX':
+                    backgroundClass = 'bg-board-phoenix';
+                    break;
+                case 'SCORPION':
+                    backgroundClass = 'bg-board-scorpion';
+                    break;
+                case 'SPIDER':
+                    backgroundClass = 'bg-board-spider';
+                    break;
+                case 'UNICORN':
+                    backgroundClass = 'bg-board-unicorn';
+                    break;
+                default:
+                    backgroundClass = 'bg-board-default';
+                    break;
+            }
+        }
+
+        return (<div className={ backgroundClass }>
             <NavBar leftMenu={ leftMenu } rightMenu={ rightMenu } title='Jigoku Online' currentPath={ this.props.path } numGames={ this.props.games.length } />
             <div className='container'>
-                { component }
+                <ErrorBoundary navigate={ this.props.navigate } errorPath={ this.props.path } message={ 'We\'re sorry - something\'s gone wrong.' }>
+                    { component }
+                </ErrorBoundary>
             </div>
         </div>);
     }
@@ -344,43 +425,49 @@ class App extends React.Component {
 
 App.displayName = 'Application';
 App.propTypes = {
-    clearGameState: React.PropTypes.func,
-    currentGame: React.PropTypes.object,
-    disconnecting: React.PropTypes.bool,
-    dispatch: React.PropTypes.func,
-    gameSocketConnectError: React.PropTypes.func,
-    gameSocketConnected: React.PropTypes.func,
-    gameSocketConnecting: React.PropTypes.func,
-    gameSocketDisconnect: React.PropTypes.func,
-    gameSocketReconnecting: React.PropTypes.func,
-    games: React.PropTypes.array,
-    loadCards: React.PropTypes.func,
-    loadFactions: React.PropTypes.func,
-    loadPacks: React.PropTypes.func,
-    loggedIn: React.PropTypes.bool,
-    navigate: React.PropTypes.func,
-    path: React.PropTypes.string,
-    receiveBannerNotice: React.PropTypes.func,
-    receiveGameState: React.PropTypes.func,
-    receiveGames: React.PropTypes.func,
-    receiveJoinGame: React.PropTypes.func,
-    receiveLobbyMessage: React.PropTypes.func,
-    receiveLobbyMessages: React.PropTypes.func,
-    receiveNewGame: React.PropTypes.func,
-    receivePasswordError: React.PropTypes.func,
-    receiveUsers: React.PropTypes.func,
-    sendGameSocketConnectFailed: React.PropTypes.func,
-    setContextMenu: React.PropTypes.func,
-    socketConnected: React.PropTypes.func,
-    token: React.PropTypes.string,
-    user: React.PropTypes.object,
-    username: React.PropTypes.string
+    clearGameState: PropTypes.func,
+    closeGameSocket: PropTypes.func,
+    currentGame: PropTypes.object,
+    currentGameId: PropTypes.string,
+    disconnecting: PropTypes.bool,
+    dispatch: PropTypes.func,
+    gameSocket: PropTypes.object,
+    gameSocketConnectError: PropTypes.func,
+    gameSocketConnected: PropTypes.func,
+    gameSocketConnecting: PropTypes.func,
+    gameSocketDisconnect: PropTypes.func,
+    gameSocketReconnecting: PropTypes.func,
+    games: PropTypes.array,
+    loadCards: PropTypes.func,
+    loadFactions: PropTypes.func,
+    loadPacks: PropTypes.func,
+    loggedIn: PropTypes.bool,
+    navigate: PropTypes.func,
+    onGameHandoffReceived: PropTypes.func,
+    path: PropTypes.string,
+    receiveBannerNotice: PropTypes.func,
+    receiveGameState: PropTypes.func,
+    receiveGames: PropTypes.func,
+    receiveJoinGame: PropTypes.func,
+    receiveLobbyMessage: PropTypes.func,
+    receiveLobbyMessages: PropTypes.func,
+    receiveNewGame: PropTypes.func,
+    receivePasswordError: PropTypes.func,
+    receiveUsers: PropTypes.func,
+    sendGameSocketConnectFailed: PropTypes.func,
+    setContextMenu: PropTypes.func,
+    socketConnected: PropTypes.func,
+    token: PropTypes.string,
+    user: PropTypes.object,
+    username: PropTypes.string
 };
 
 function mapStateToProps(state) {
     return {
         currentGame: state.games.currentGame,
+        currentGameId: state.games.gameId,
         disconnecting: state.socket.gameDisconnecting,
+        gameSocket: state.socket.gameSocket,
         games: state.games.games,
         path: state.navigation.path,
         loggedIn: state.auth.loggedIn,

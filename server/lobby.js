@@ -8,10 +8,11 @@ const logger = require('./log.js');
 const version = moment(require('../version.js'));
 const PendingGame = require('./pendinggame.js');
 const GameRouter = require('./gamerouter.js');
-const MessageRepository = require('./repositories/messageRepository.js');
-const DeckRepository = require('./repositories/deckRepository.js');
-const CardService = require('./repositories/cardService.js');
+const MessageService = require('./services/MessageService.js');
+const DeckService = require('./services/DeckService.js');
+const CardService = require('./services/CardService.js');
 const validateDeck = require('../client/deck-validator.js'); // XXX Move this to a common location
+const Settings = require('./settings.js');
 
 class Lobby {
     constructor(server, options = {}) {
@@ -19,15 +20,17 @@ class Lobby {
         this.users = {};
         this.games = {};
         this.config = options.config;
-        this.messageRepository = options.messageRepository || new MessageRepository(this.config.dbPath);
-        this.deckRepository = options.deckRepository || new DeckRepository(this.config.dbPath);
-        this.cardService = options.cardService || new CardService({ dbPath: this.config.dbPath });
+        this.messageService = options.messageService || new MessageService(options.db);
+        this.deckService = options.deckService || new DeckService(options.db);
+        this.cardService = options.cardService || new CardService(options.db);
         this.router = options.router || new GameRouter(this.config);
+        this.titleCardData = null;
 
         this.router.on('onGameClosed', this.onGameClosed.bind(this));
         this.router.on('onPlayerLeft', this.onPlayerLeft.bind(this));
         this.router.on('onWorkerTimedOut', this.onWorkerTimedOut.bind(this));
         this.router.on('onNodeReconnected', this.onNodeReconnected.bind(this));
+        this.router.on('onWorkerStarted', this.onWorkerStarted.bind(this));
 
         this.io = options.io || socketio(server, { perMessageDeflate: false });
         this.io.set('heartbeat timeout', 30000);
@@ -35,6 +38,14 @@ class Lobby {
         this.io.on('connection', this.onConnection.bind(this));
 
         this.lastUserBroadcast = moment();
+
+        this.loadCardData();
+
+        setInterval(() => this.clearStaleGames(), 60 * 1000);
+    }
+
+    async loadCardData() {
+        this.shortCardData = await this.cardService.getAllCards({ shortForm: true });
     }
 
     // External methods
@@ -113,7 +124,7 @@ class Lobby {
             return {
                 name: user.username,
                 emailHash: user.emailHash,
-                noAvatar: user.settings ? user.settings.disableGravatar : false
+                noAvatar: user.settings.disableGravatar
             };
         });
 
@@ -150,36 +161,62 @@ class Lobby {
     }
 
     // Actions
-    broadcastMessage(message, ...params) {
-        this.io.emit(message, ...params);
+    filterGameListWithBlockList(user) {
+        if(!user) {
+            return this.games;
+        }
+
+        return _.filter(this.games, game => {
+            let userBlockedByOwner = game.isUserBlocked(user);
+            let userHasBlockedPlayer = _.any(game.players, player => _.contains(user.blockList, player.name.toLowerCase()));
+            return !userBlockedByOwner && !userHasBlockedPlayer;
+        });
+    }
+
+    mapGamesToGameSummaries(games) {
+        return _.chain(games)
+            .map(game => game.getSummary())
+            .sortBy('createdAt')
+            .reverse()
+            .sortBy('started')
+            .value();
+    }
+
+    sendUserListFilteredWithBlockList(socket, userList) {
+        let filteredUsers = userList;
+
+        if(socket.user) {
+            filteredUsers = _.reject(userList, user => {
+                return _.contains(socket.user.blockList, user.name.toLowerCase());
+            });
+        }
+
+        socket.send('users', filteredUsers);
     }
 
     broadcastGameList(socket) {
-        var gameSummaries = [];
-
-        _.each(this.games, game => {
-            gameSummaries.push(game.getSummary());
-        });
-
-        gameSummaries = _.sortBy(gameSummaries, 'createdAt').reverse();
-
-        if(socket) {
+        let sockets = socket ? [socket] : this.sockets;
+        _.each(sockets, socket => {
+            let filteredGames = this.filterGameListWithBlockList(socket.user);
+            let gameSummaries = this.mapGamesToGameSummaries(filteredGames);
             socket.send('games', gameSummaries);
-        } else {
-            this.broadcastMessage('games', gameSummaries);
-        }
+        });
     }
 
     broadcastUserList() {
         var now = moment();
 
-        if((now - this.lastUserBroadcast) / 1000 < 60) {
+        if((now.diff(this.lastUserBroadcast)) / 1000 < 60) {
             return;
         }
 
         this.lastUserBroadcast = moment();
 
-        this.broadcastMessage('users', this.getUserList());
+        let users = this.getUserList();
+
+        _.each(this.sockets, socket => {
+            this.sendUserListFilteredWithBlockList(socket, users);
+        });
     }
 
     sendGameState(game) {
@@ -192,6 +229,7 @@ class Lobby {
                 logger.info('Wanted to send to ', player.id, ' but have no socket');
                 return;
             }
+
             this.sockets[player.id].send('gamestate', game.getSummary(player.name));
         });
     }
@@ -204,6 +242,29 @@ class Lobby {
         });
 
         this.broadcastGameList();
+    }
+
+    clearStaleGames() {
+        let now = Date.now();
+        const timeout = 60 * 60 * 1000;
+        let stalePendingGames = _.filter(this.games, game => !game.started && now - game.createdAt > timeout);
+        let emptyGames = _.filter(this.games, game =>
+            game.started && now - game.createdAt > timeout && _.isEmpty(game.getPlayers()));
+
+        _.each(stalePendingGames, game => {
+            logger.info('closed pending game', game.id, 'due to inactivity');
+            delete this.games[game.id];
+        });
+
+        _.each(emptyGames, game => {
+            logger.info('closed started game', game.id, 'due to no active players');
+            delete this.games[game.id];
+            this.router.closeGame(game);
+        });
+
+        if(emptyGames.length > 0 || stalePendingGames.length > 0) {
+            this.broadcastGameList();
+        }
     }
 
     // Events
@@ -227,18 +288,15 @@ class Lobby {
         this.sockets[ioSocket.id] = socket;
 
         if(socket.user) {
-            this.users[socket.user.username] = socket.user;
+            this.users[socket.user.username] = Settings.getUserWithDefaultsSet(socket.user);
 
             this.broadcastUserList();
         }
 
-        socket.send('users', this.getUserList());
+        // Force user list send for the newly connected socket, bypassing the throttle
+        this.sendUserListFilteredWithBlockList(socket, this.getUserList());
 
-        this.messageRepository.getLastMessages((err, messages) => {
-            if(err) {
-                return;
-            }
-
+        this.messageService.getLastMessages().then(messages => {
             socket.send('lobbymessages', messages.reverse());
         });
 
@@ -250,12 +308,13 @@ class Lobby {
 
         var game = this.findGameForUser(socket.user.username);
         if(game && game.started) {
-            socket.send('handoff', { address: game.node.address, port: game.node.port, protocol: game.node.protocol, name: game.node.identity });
+            socket.send('handoff', { address: game.node.address, port: game.node.port, protocol: game.node.protocol, name: game.node.identity, gameId: game.id });
         }
     }
 
-    onAuthenticated(user) {
-        this.users[user.username] = user;
+    onAuthenticated(socket, user) {
+        let userWithDefaults = Settings.getUserWithDefaultsSet(user);
+        this.users[user.username] = userWithDefaults;
 
         this.broadcastUserList();
     }
@@ -297,7 +356,7 @@ class Lobby {
             return;
         }
 
-        var game = new PendingGame(socket.user, gameDetails);
+        let game = new PendingGame(socket.user, gameDetails);
         game.newGame(socket.id, socket.user, gameDetails.password, (err, message) => {
             if(err) {
                 logger.info('game failed to create', err, message);
@@ -428,10 +487,17 @@ class Lobby {
     }
 
     onLobbyChat(socket, message) {
-        var chatMessage = { user: { username: socket.user.username, emailHash: socket.user.emailHash, noAvatar: socket.user.settings ? socket.user.settings.disableGravatar : false }, message: message, time: new Date() };
+        var chatMessage = { user: { username: socket.user.username, emailHash: socket.user.emailHash, noAvatar: socket.user.settings.disableGravatar }, message: message, time: new Date() };
 
-        this.messageRepository.addMessage(chatMessage);
-        this.broadcastMessage('lobbychat', chatMessage);
+        _.each(this.sockets, s => {
+            if(s.user && _.contains(s.user.blockList, chatMessage.user.username.toLowerCase())) {
+                return;
+            }
+
+            s.send('lobbychat', chatMessage);
+        });
+
+        this.messageService.addMessage(chatMessage);
     }
 
     onSelectDeck(socket, gameId, deckId) {
@@ -444,43 +510,34 @@ class Lobby {
             return;
         }
 
-        let cards = {};
-        let packs = {};
+        Promise.all([this.cardService.getAllCards(), this.cardService.getAllPacks(), this.deckService.getById(deckId)])
+            .then(results => {
+                let [cards, packs, deck] = results;
 
-        this.cardService.getAllCards()
-            .then(result => {
-                cards = result;
-
-                return this.cardService.getAllPacks();
-            })
-            .then(result => {
-                packs = result;
-
-                this.deckRepository.getById(deckId, (err, deck) => {
-
-                    _.each(deck.stronghold, stronghold => {
-                        stronghold.card = cards[stronghold.card.id];
-                    });
-
-                    _.each(deck.provinceCards, province => {
-                        province.card = cards[province.card.id];
-                    });
-
-                    _.each(deck.conflictCards, conflict => {
-                        conflict.card = cards[conflict.card.id];
-                    });
-
-                    _.each(deck.dynastyCards, dynasty => {
-                        dynasty.card = cards[dynasty.card.id];
-                    });
-
-                    let validation = validateDeck(deck, packs);
-                    deck.status = validation.status;
-
-                    game.selectDeck(socket.user.username, deck);
-
-                    this.sendGameState(game);
+                _.each(deck.stronghold, stronghold => {
+                    stronghold.card = cards[stronghold.card.id];
                 });
+
+                _.each(deck.role, role => {
+                    role.card = cards[role.card.id];
+                });
+
+                _.each(deck.provinceCards, province => {
+                    province.card = cards[province.card.id];
+                });
+
+                _.each(deck.conflictCards, conflict => {
+                    conflict.card = cards[conflict.card.id];
+                });
+
+                _.each(deck.dynastyCards, dynasty => {
+                    dynasty.card = cards[dynasty.card.id];
+                });
+
+                deck.status = validateDeck(deck, { packs: packs, includeExtendedStatus: false });
+                game.selectDeck(socket.user.username, deck);
+
+                this.sendGameState(game);
             })
             .catch(err => {
                 logger.info(err);
@@ -551,9 +608,13 @@ class Lobby {
         this.clearGamesForNode(nodeName);
     }
 
+    onWorkerStarted(nodeName) {
+        this.router.sendCommand(nodeName, 'CARDDATA', { titleCardData: this.titleCardData, shortCardData: this.shortCardData });
+    }
+
     onNodeReconnected(nodeName, games) {
         _.each(games, game => {
-            var syncGame = new PendingGame({ username: game.owner }, {spectators: game.allowSpectators, name: game.name});
+            let syncGame = new PendingGame({ username: game.owner }, { spectators: game.allowSpectators, name: game.name });
             syncGame.id = game.id;
             syncGame.node = this.router.workers[nodeName];
             syncGame.createdAt = game.startedAt;
@@ -567,7 +628,7 @@ class Lobby {
                     name: player.name,
                     emailHash: player.emailHash,
                     owner: game.owner === player.name,
-                    faction: player.faction 
+                    faction: { cardData: { code: player.faction } }
                 };
             });
 

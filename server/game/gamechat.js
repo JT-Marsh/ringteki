@@ -1,74 +1,70 @@
 const _ = require('underscore');
 
-const BaseCard = require('./basecard.js');
-const Spectator = require('./spectator.js');
-
 class GameChat {
     constructor() {
         this.messages = [];
     }
 
-    addChatMessage(message) {
-        var args = Array.from(arguments).slice(1);
-        var formattedMessage = this.formatMessage(message, args);
+    addChatMessage(player, message) {
+        let playerArg = {
+            name: player.user.username,
+            emailHash: player.user.emailHash,
+            noAvatar: player.user.settings.disableGravatar
+        };
+
+        this.addMessage('{0} {1}', playerArg, message);
+    }
+
+    addMessage(message, ...args) {
+        let formattedMessage = this.formatMessage(message, args);
 
         this.messages.push({ date: new Date(), message: formattedMessage });
     }
 
-    addMessage(message) {
-        var args = Array.from(arguments).slice(1);
-        var argList = [];
+    addAlert(type, message, ...args) {
+        let formattedMessage = this.formatMessage(message, args);
 
-        args = _.reduce(args, (argList, arg) => {
-            if(arg instanceof Spectator) {
-                argList.push(arg.name);
-            } else if(arg && arg.emailHash) {
-                argList.push({ name: arg.name, emailHash: arg.emailHash, noAvatar: arg.user.settings.disableGravatar });
-            } else {
-                argList.push(arg);
-            }
-
-            return argList;
-        }, argList);
-
-        var formattedMessage = this.formatMessage(message, args);
-
-        this.messages.push({ date: new Date(), message: formattedMessage });
+        this.messages.push({ date: new Date(), message: { alert: { type: type, message: formattedMessage } } });
     }
 
     formatMessage(format, args) {
-        if(_.isNull(format) || _.isUndefined(format)) {
+        if(!format) {
             return '';
         }
 
-        var messageFragments = format.split(/(\{\d+\})/);
-
-        return _.map(messageFragments, fragment => {
-            var argMatch = fragment.match(/\{(\d+)\}/);
-            if(argMatch) {
-                var arg = args[argMatch[1]];
-                if(!_.isUndefined(arg) && !_.isNull(arg)) {
-                    if(_.isArray(arg)) {
-                        return this.formatArray(arg);
-                    } else if(arg instanceof BaseCard) {
-                        return { code: arg.code, label: arg.name, type: arg.getType() };
-                    } else if(arg instanceof Spectator) {
-                        return { name: arg.user.username, emailHash: arg.user.emailHash, noAvatar: arg.user.settings ? arg.user.settings.disableGravatar : false };
+        let fragments = format.split(/(\{\d+\})/);
+        return fragments.reduce((output, fragment) => {
+            let argMatch = fragment.match(/\{(\d+)\}/);
+            if(argMatch && args) {
+                let arg = args[argMatch[1]];
+                if(arg || arg === 0) {
+                    if(arg.message) {
+                        return output.concat(arg.message);
+                    } else if(Array.isArray(arg)) {
+                        if(typeof arg[0] === 'string' && arg[0].includes('{')) {
+                            return output.concat(this.formatMessage(arg[0], arg.slice(1)));
+                        }
+                        return output.concat(this.formatArray(arg));
+                    } else if(arg.getShortSummary) {
+                        return output.concat(arg.getShortSummary());
                     }
+                    return output.concat(arg);
 
-                    return arg;
                 }
-
-                return '';
+            } else if(!argMatch && fragment) {
+                let splitFragment = fragment.split(' ');
+                let lastWord = splitFragment.pop();
+                return splitFragment.reduce((output, word) => {
+                    return output.concat(word || [], ' ');
+                }, output).concat(lastWord || []);
             }
-
-            return fragment;
-        });
+            return output;
+        }, []);
     }
 
     formatArray(array) {
         if(array.length === 0) {
-            return '';
+            return [];
         }
 
         var format;
@@ -79,10 +75,10 @@ class GameChat {
             format = '{0} and {1}';
         } else {
             var range = _.map(_.range(array.length - 1), i => '{' + i + '}');
-            format = range.join(', ') + ', and {' + (array.length - 1) + '}';
+            format = range.join(', ') + ' and {' + (array.length - 1) + '}';
         }
 
-        return { message: this.formatMessage(format, array) };
+        return this.formatMessage(format, array);
     }
 }
 

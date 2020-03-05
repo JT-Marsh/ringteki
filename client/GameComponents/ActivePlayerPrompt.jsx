@@ -1,5 +1,10 @@
 import React from 'react';
+import PropTypes from 'prop-types';
+import Draggable from 'react-draggable';
 import _ from 'underscore';
+
+import AbilityTargeting from './AbilityTargeting.jsx';
+import CardNameLookup from './CardNameLookup.jsx';
 
 class ActivePlayerPrompt extends React.Component {
     constructor() {
@@ -13,7 +18,8 @@ class ActivePlayerPrompt extends React.Component {
 
     shouldComponentUpdate(newProps, newState) {
         return newProps.phase !== this.props.phase || newProps.promptTitle !== this.props.promptTitle ||
-            newProps.title !== this.props.title || newProps.arrowDirection !== this.props.arrowDirection ||
+            newProps.title !== this.props.title ||
+            !this.buttonsAreEqual(this.props.buttons, newProps.buttons) ||
             newState.showTimer !== this.state.showTimer ||
             newState.timeLeft !== this.state.timeLeft || newState.timerClass !== this.state.timerClass;
     }
@@ -23,7 +29,7 @@ class ActivePlayerPrompt extends React.Component {
             return;
         }
 
-        if(newProps.user.settings && newProps.user.settings.windowTimer === 0) {
+        if(newProps.user.settings.windowTimer === 0) {
             return;
         }
 
@@ -35,7 +41,7 @@ class ActivePlayerPrompt extends React.Component {
             }
 
             this.timer.started = new Date();
-            this.timer.timerTime = (_.isUndefined(newProps.user.settings) || _.isUndefined(newProps.user.settings.windowTimer)) ? 10 : newProps.user.settings.windowTimer;
+            this.timer.timerTime = newProps.user.settings.windowTimer;
 
             let handle = setInterval(() => {
                 let now = new Date();
@@ -66,7 +72,21 @@ class ActivePlayerPrompt extends React.Component {
         }
     }
 
-    onButtonClick(event, command, arg, method) {
+    buttonsAreEqual(oldButtons, newButtons) {
+        if(!oldButtons || !newButtons || oldButtons.length !== newButtons.length) {
+            return false;
+        }
+
+        for(let i = 0; i < oldButtons.length; ++i) {
+            if(!_.isEqual(oldButtons[i], newButtons[i])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    onButtonClick(event, command, arg, uuid, method) {
         event.preventDefault();
 
         if(this.state.timerHandle) {
@@ -76,7 +96,7 @@ class ActivePlayerPrompt extends React.Component {
         this.setState({ showTimer: false, timerHandle: undefined, timerCancelled: true });
 
         if(this.props.onButtonClick) {
-            this.props.onButtonClick(command, arg, method);
+            this.props.onButtonClick(command, arg, uuid, method);
         }
     }
 
@@ -90,7 +110,7 @@ class ActivePlayerPrompt extends React.Component {
         this.setState({ showTimer: false, timerHandle: undefined, timerCancelled: true });
 
         if(button.method) {
-            this.props.onButtonClick(button.command, button.arg, button.method);
+            this.props.onButtonClick(button.command, button.arg, button.uuid, button.method);
         }
     }
 
@@ -117,11 +137,11 @@ class ActivePlayerPrompt extends React.Component {
             }
 
             let clickCallback = button.timerCancel ? event => this.onCancelTimerClick(event, button) :
-                event => this.onButtonClick(event, button.command, button.arg, button.method);
+                event => this.onButtonClick(event, button.command, button.arg, button.uuid, button.method);
 
             let option = (
                 <button key={ button.command + buttonIndex.toString() }
-                    className='btn btn-primary'
+                    className='btn btn-default'
                     onClick={ clickCallback }
                     onMouseOver={ event => this.onMouseOver(event, button.card) }
                     onMouseOut={ event => this.onMouseOut(event, button.card) }
@@ -133,6 +153,35 @@ class ActivePlayerPrompt extends React.Component {
         });
 
         return buttons;
+    }
+
+    onCardNameSelected(command, uuid, method, cardName) {
+        if(this.props.onButtonClick) {
+            this.props.onButtonClick(command, cardName, uuid, method);
+        }
+    }
+
+    getControls() {
+        return _.map(this.props.controls, control => {
+            switch(control.type) {
+                case 'targeting':
+                    return (
+                        <AbilityTargeting
+                            onMouseOut={ this.props.onMouseOut }
+                            onMouseOver={ this.props.onMouseOver }
+                            source={ control.source }
+                            targets={ control.targets } />);
+                case 'card-name':
+                    return <CardNameLookup cards={ this.props.cards } onCardSelected={ this.onCardNameSelected.bind(this, control.command, control.uuid, control.method) } />;
+            }
+        });
+    }
+
+    getDefaultPosition() {
+        return {
+            x: (window.innerWidth / 2) - 105,
+            y: (window.innerHeight / 2) - 211
+        };
     }
 
     render() {
@@ -154,48 +203,44 @@ class ActivePlayerPrompt extends React.Component {
                 </div>);
         }
 
-        var arrow = null;
-        if(this.props.arrowDirection === 'up') {
-            arrow = <span className='up-arrow' />;
-        } else if(this.props.arrowDirection === 'down') {
-            arrow = <span className='down-arrow' />;
-        }
-
-        return (<div>
-            { timer }
-            <div className={ 'phase-indicator ' + this.props.phase } onClick={ this.props.onTitleClick }>
-                { arrow }
-                { this.props.phase } phase
-            </div>
-            { promptTitle }
-            <div className='menu-pane'>
-                <div className='panel'>
-                    <h4>{ this.props.title }</h4>
-                    { this.getButtons() }
+        return (<Draggable handle='grip'
+            defaultPosition={ this.getDefaultPosition() } >
+            <div className='no-highlight'>
+                { timer }
+                <grip>
+                    <div className={ 'phase-indicator ' + this.props.phase } onClick={ this.props.onTitleClick }>
+                        { this.props.phase } phase
+                    </div>
+                </grip>
+                { promptTitle }
+                <div className='menu-pane'>
+                    <div className='panel'>
+                        <h4>{ this.props.title }</h4>
+                        { this.getControls() }
+                        { this.getButtons() }
+                    </div>
                 </div>
             </div>
-        </div>);
+        </Draggable>);
     }
 }
 
 ActivePlayerPrompt.displayName = 'ActivePlayerPrompt';
 ActivePlayerPrompt.propTypes = {
-    arrowDirection: React.PropTypes.oneOf([
-        'up',
-        'down',
-        'none'
-    ]),
-    buttons: React.PropTypes.array,
-    onButtonClick: React.PropTypes.func,
-    onMouseOut: React.PropTypes.func,
-    onMouseOver: React.PropTypes.func,
-    onTimerExpired: React.PropTypes.func,
-    onTitleClick: React.PropTypes.func,
-    phase: React.PropTypes.string,
-    promptTitle: React.PropTypes.string,
-    socket: React.PropTypes.object,
-    title: React.PropTypes.string,
-    user: React.PropTypes.object
+    buttons: PropTypes.array,
+    cards: PropTypes.object,
+    controls: PropTypes.array,
+    getDefaultPosition: PropTypes.func,
+    onButtonClick: PropTypes.func,
+    onMouseOut: PropTypes.func,
+    onMouseOver: PropTypes.func,
+    onTimerExpired: PropTypes.func,
+    onTitleClick: PropTypes.func,
+    phase: PropTypes.string,
+    promptTitle: PropTypes.string,
+    socket: PropTypes.object,
+    title: PropTypes.string,
+    user: PropTypes.object
 };
 
 export default ActivePlayerPrompt;

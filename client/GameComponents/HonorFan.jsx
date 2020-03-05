@@ -1,4 +1,5 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 import _ from 'underscore';
 
 class HonorFan extends React.Component {
@@ -48,22 +49,22 @@ class HonorFan extends React.Component {
 
     render() {
 
-        return (<div>
-            <div className='honor-fan'>
+        return (
+            <div className={ 'honor-fan no-highlight ' + this.props.size }>
                 <img className='honor-fan-value' src={ '/img/honorfan-' + this.props.value + '.png' } />
-            </div>
-        </div>);
+            </div>);
     }
 }
 
 HonorFan.displayName = 'HonorFan';
 HonorFan.propTypes = {
-    buttons: React.PropTypes.array,
-    onButtonClick: React.PropTypes.func,
-    onMouseOut: React.PropTypes.func,
-    onMouseOver: React.PropTypes.func,
-    socket: React.PropTypes.object,
-    value: React.PropTypes.string
+    buttons: PropTypes.array,
+    onButtonClick: PropTypes.func,
+    onMouseOut: PropTypes.func,
+    onMouseOver: PropTypes.func,
+    size: PropTypes.string,
+    socket: PropTypes.object,
+    value: PropTypes.string
 };
 
 export default HonorFan;

@@ -1,426 +1,137 @@
 const _ = require('underscore');
-const ChooseCost = require('./costs/choosecost.js');
+const ReduceableFateCost = require('./costs/ReduceableFateCost');
+const TargetDependentFateCost = require('./costs/TargetDependentFateCost');
+const GameActions = require('./GameActions/GameActions');
+const GameActionCost = require('./costs/GameActionCost');
+const MetaActionCost = require('./costs/MetaActionCost');
+const Event = require('./Events/Event');
+const { EventNames, Locations, Players, TargetModes } = require('./Constants');
+
+function getSelectCost(action, properties, activePromptTitle) {
+    return new MetaActionCost(GameActions.selectCard(Object.assign({ gameAction: action }, properties)), activePromptTitle);
+}
 
 const Costs = {
     /**
-     * Cost that aggregates a list of other costs.
-     */
-    all: function(...costs) {
-        return {
-            canPay: function(context) {
-                return _.all(costs, cost => cost.canPay(context));
-            },
-            pay: function(context) {
-                _.each(costs, cost => cost.pay(context));
-            }
-        };
-    },
-    /**
-     * Cost that allows the player to choose between multiple costs. The
-     * `choices` object should have string keys representing the button text
-     * that will be used to prompt the player, with the values being the cost
-     * associated with that choice.
-     */
-    choose: function(choices) {
-        return new ChooseCost(choices);
-    },
-    /**
      * Cost that will bow the card that initiated the ability.
      */
-    bowSelf: function() {
-        return {
-            canPay: function(context) {
-                return !context.source.bowed;
-            },
-            pay: function(context) {
-                context.source.controller.bowCard(context.source);
-            },
-            canUnpay: function(context) {
-                return context.source.bowed;
-            },
-            unpay: function(context) {
-                context.source.controller.standCard(context.source);
-            }
-        };
-    },
+    bowSelf: () => new GameActionCost(GameActions.bow()),
     /**
-     * Cost that will bow the player's faction card.
+     * Cost that will bow the card that the card that initiated the ability is attached to.
      */
-    bowFactionCard: function() {
-        return {
-            canPay: function(context) {
-                return !context.player.faction.bowed;
-            },
-            pay: function(context) {
-                context.player.bowCard(context.player.faction);
-            }
-        };
-    },
+    bowParent: () => new GameActionCost(GameActions.bow(context => ({ target: context.source.parent }))),
     /**
      * Cost that requires bowing a card that matches the passed condition
      * predicate function.
      */
-    bow: function(condition) {
-        var fullCondition = (card, context) => (
-            !card.bowed &&
-            card.location === 'play area' &&
-            card.controller === context.player &&
-            condition(card)
-        );
-        return {
-            canPay: function(context) {
-                return context.player.anyCardsInPlay(card => fullCondition(card, context));
-            },
-            resolve: function(context, result = { resolved: false }) {
-                context.game.promptForSelect(context.player, {
-                    cardCondition: card => fullCondition(card, context),
-                    activePromptTitle: 'Select card to bow',
-                    source: context.source,
-                    onSelect: (player, card) => {
-                        context.bowingCostCard = card;
-                        result.value = true;
-                        result.resolved = true;
-
-                        return true;
-                    },
-                    onCancel: () => {
-                        result.value = false;
-                        result.resolved = true;
-                    }
-                });
-
-                return result;
-            },
-            pay: function(context) {
-                context.player.bowCard(context.bowingCostCard);
-            }
-        };
-    },
-    /**
-     * Cost that requires bowing a certain number of cards that match the
-     * passed condition predicate function.
-     */
-    bowMultiple: function(number, condition) {
-        var fullCondition = (card, context) => (
-            !card.bowed &&
-            card.location === 'play area' &&
-            card.controller === context.player &&
-            condition(card)
-        );
-        return {
-            canPay: function(context) {
-                return context.player.getNumberOfCardsInPlay(card => fullCondition(card, context)) >= number;
-            },
-            resolve: function(context, result = { resolved: false }) {
-                context.game.promptForSelect(context.player, {
-                    cardCondition: card => fullCondition(card, context),
-                    activePromptTitle: 'Select ' + number + ' cards to bow',
-                    numCards: number,
-                    multiSelect: true,
-                    source: context.source,
-                    onSelect: (player, cards) => {
-                        if(cards.length !== number) {
-                            return false;
-                        }
-
-                        context.bowingCostCards = cards;
-                        result.value = true;
-                        result.resolved = true;
-
-                        return true;
-                    },
-                    onCancel: () => {
-                        result.value = false;
-                        result.resolved = true;
-                    }
-                });
-
-                return result;
-            },
-            pay: function(context) {
-                _.each(context.bowingCostCards, card => {
-                    context.player.bowCard(card);
-                });
-            }
-        };
-    },
+    bow: properties => getSelectCost(GameActions.bow(), properties, 'Select card to bow'),
     /**
      * Cost that will sacrifice the card that initiated the ability.
      */
-    sacrificeSelf: function() {
-        return {
-            canPay: function() {
-                return true;
-            },
-            pay: function(context) {
-                context.source.controller.sacrificeCard(context.source);
-            }
-        };
-    },
+    sacrificeSelf: () => new GameActionCost(GameActions.sacrifice()),
+    /**
+     * Cost that will sacrifice a specified card.
+     */
+    sacrificeSpecific: cardFunc => new GameActionCost(GameActions.sacrifice(context => ({ target: cardFunc(context) }))),
     /**
      * Cost that requires sacrificing a card that matches the passed condition
      * predicate function.
      */
-    sacrifice: function(condition) {
-        var fullCondition = (card, context) => (
-            card.location === 'play area' &&
-            card.controller === context.player &&
-            condition(card)
-        );
-        return {
-            canPay: function(context) {
-                return context.player.anyCardsInPlay(card => fullCondition(card, context));
-            },
-            resolve: function(context, result = { resolved: false }) {
-                context.game.promptForSelect(context.player, {
-                    cardCondition: card => fullCondition(card, context),
-                    activePromptTitle: 'Select card to sacrifice',
-                    source: context.source,
-                    onSelect: (player, card) => {
-                        context.sacrificeCostCard = card;
-                        result.value = true;
-                        result.resolved = true;
-
-                        return true;
-                    },
-                    onCancel: () => {
-                        result.value = false;
-                        result.resolved = true;
-                    }
-                });
-
-                return result;
-            },
-            pay: function(context) {
-                context.player.sacrificeCard(context.sacrificeCostCard);
-            }
-        };
-    },
+    sacrifice: properties => getSelectCost(GameActions.sacrifice(), properties, 'Select card to sacrifice'),
     /**
-     * Cost that will remove from game the card that initiated the ability.
+     * Cost that will return a selected card to hand which matches the passed
+     * condition.
      */
-    removeSelfFromGame: function() {
-        return {
-            canPay: function() {
-                return true;
-            },
-            pay: function(context) {
-                context.source.controller.moveCard(context.source, 'out of game');
-            }
-        };
-    },
+    returnToHand: properties => getSelectCost(GameActions.returnToHand(), properties, 'Select card to return to hand'),
     /**
-     * Cost that requires you return a card matching the condition to the
-     * player's hand.
+     * Cost that will return a selected card to the appropriate deck which matches the passed
+     * condition.
      */
-    returnToHand: function(condition) {
-        var fullCondition = (card, context) => (
-            card.location === 'play area' &&
-            card.controller === context.player &&
-            condition(card)
-        );
-        return {
-            canPay: function(context) {
-                return context.player.anyCardsInPlay(card => fullCondition(card, context));
-            },
-            resolve: function(context, result = { resolved: false }) {
-                context.game.promptForSelect(context.player, {
-                    cardCondition: card => fullCondition(card, context),
-                    activePromptTitle: 'Select card to return to hand',
-                    source: context.source,
-                    onSelect: (player, card) => {
-                        context.costs.returnedToHandCard = card;
-                        result.value = true;
-                        result.resolved = true;
-
-                        return true;
-                    },
-                    onCancel: () => {
-                        result.value = false;
-                        result.resolved = true;
-                    }
-                });
-
-                return result;
-            },
-            pay: function(context) {
-                context.player.returnCardToHand(context.costs.returnedToHandCard, false);
-            }
-        };
-    },
+    returnToDeck: properties => getSelectCost(GameActions.returnToDeck(properties), properties, 'Select card to return to your deck'),
     /**
      * Cost that will return to hand the card that initiated the ability.
      */
-    returnSelfToHand: function() {
-        return {
-            canPay: function() {
-                return true;
-            },
-            pay: function(context) {
-                context.source.controller.returnCardToHand(context.source, false);
-            }
-        };
-    },
+    returnSelfToHand: () => new GameActionCost(GameActions.returnToHand()),
     /**
-     * Cost that requires revealing a certain number of cards in hand that match
-     * the passed condition predicate function.
+     * Cost that will shuffle a selected card into the relevant deck which matches the passed
+     * condition.
      */
-    revealCards: function(number, condition) {
-        var fullCondition = (card, context) => (
-            card.location === 'hand' &&
-            card.controller === context.player &&
-            condition(card)
-        );
-        return {
-            canPay: function(context) {
-                let potentialCards = context.player.findCards(context.player.hand, card => fullCondition(card, context));
-                return _.size(potentialCards) >= number;
-            },
-            resolve: function(context, result = { resolved: false }) {
-                context.game.promptForSelect(context.player, {
-                    cardCondition: card => fullCondition(card, context),
-                    activePromptTitle: 'Select ' + number + ' cards to reveal',
-                    numCards: number,
-                    multiSelect: true,
-                    source: context.source,
-                    onSelect: (player, cards) => {
-                        if(cards.length !== number) {
-                            return false;
-                        }
-
-                        context.revealingCostCards = cards;
-                        result.value = true;
-                        result.resolved = true;
-
-                        return true;
-                    },
-                    onCancel: () => {
-                        result.value = false;
-                        result.resolved = true;
-                    }
-                });
-
-                return result;
-            },
-            pay: function(context) {
-                context.game.addMessage('{0} reveals {1} from their hand', context.player, context.revealingCostCards);
-            }
-        };
-    },
+    shuffleIntoDeck: properties => getSelectCost(
+        GameActions.moveCard({ destination: Locations.DynastyDeck, shuffle: true }),
+        properties,
+        'Select card to shuffle into deck'
+    ),
     /**
-     * Cost that will stand the card that initiated the ability (e.g.,
-     * Barristan Selmy (TS)).
+     * Cost that requires discarding a specific card.
      */
-    standSelf: function() {
-        return {
-            canPay: function(context) {
-                return context.source.bowed;
-            },
-            pay: function(context) {
-                context.source.controller.standCard(context.source);
-            }
-        };
-    },
+    discardCardSpecific: cardFunc => new GameActionCost(GameActions.discardCard(context => ({ target: cardFunc(context) }))),
     /**
-     * Cost that will place the played event card in the player's discard pile.
+     * Cost that requires discarding a card to be selected by the player.
      */
-    expendEvent: function() {
-        return {
-            canPay: function(context) {
-                return context.player.isCardInPlayableLocation(context.source, 'play') && context.source.canBePlayed();
-            },
-            pay: function(context) {
-                context.source.controller.moveCard(context.source, 'conflict discard pile');
-            }
-        };
-    },
+    discardCard: properties => getSelectCost(GameActions.discardCard(), Object.assign({ location: Locations.Hand }, properties), 'Select card to discard'),
     /**
-     * Cost that requires discarding a card from hand.
+     * Cost that will discard a fate from the card
      */
-    discardFromHand: function() {
-        return {
-            canPay: function(context) {
-                return context.player.hand.size() >= 1;
-            },
-            resolve: function(context, result = { resolved: false }) {
-                context.game.promptForSelect(context.player, {
-                    cardCondition: card => card.location === 'hand',
-                    activePromptTitle: 'Select card to discard',
-                    source: context.source,
-                    onSelect: (player, card) => {
-                        context.discardCostCard = card;
-                        result.value = true;
-                        result.resolved = true;
-
-                        return true;
-                    },
-                    onCancel: () => {
-                        result.value = false;
-                        result.resolved = true;
-                    }
-                });
-
-                return result;
-            },
-            pay: function(context) {
-                context.player.discardCard(context.discardCostCard);
-            }
-        };
-    },
+    removeFateFromSelf: () => new GameActionCost(GameActions.removeFate()),
     /**
-     * Cost that will pay the reduceable fate cost associated with an event card
-     * and place it in discard.
+     * Cost that will discard a fate from a selected card
      */
-    playEvent: function() {
-        return Costs.all(
-            Costs.payReduceableFateCost('play'),
-            Costs.expendEvent(),
-            Costs.playLimited()
-        );
-    },
+    removeFate: properties => getSelectCost(GameActions.removeFate(), properties, 'Select character to discard a fate from'),
     /**
-     * Cost that will discard a fate from the card. Used mainly by cards
-     * having the bestow keyword.
+     * Cost that will discard a fate from the card's parent
      */
-    discardFate: function() {
-        return {
-            canPay: function(context) {
-                return context.source.hasToken('fate');
-            },
-            pay: function(context) {
-                context.source.removeToken('fate', 1);
-            }
-        };
-    },
+    removeFateFromParent: () => new GameActionCost(GameActions.removeFate(context => ({ target: context.source.parent }))),
     /**
-     * Cost that ensures that the player can still play a Limited card this
-     * round.
+    * Cost that requires removing a card selected by the player from the game.
+    */
+    removeFromGame: properties => getSelectCost(GameActions.removeFromGame(), properties, 'Select card to remove from game'),
+    /**
+     * Cost that will dishonor the character that initiated the ability
      */
-    playLimited: function() {
-        return {
-            canPay: function(context) {
-                return !context.source.isLimited() || context.player.limitedPlayed < context.player.maxLimited;
-            },
-            pay: function(context) {
-                if(context.source.isLimited()) {
-                    context.player.limitedPlayed += 1;
-                }
-            }
-        };
-    },
+    dishonorSelf: () => new GameActionCost(GameActions.dishonor()),
+    /**
+     * Cost that requires dishonoring a card to be selected by the player
+     */
+    dishonor: properties => getSelectCost(GameActions.dishonor(), properties, 'Select character to dishonor'),
+    /**
+     * Cost that will discard the status token on a card to be selected by the player
+     */
+    discardStatusToken: properties => new MetaActionCost(
+        GameActions.selectCard(
+            Object.assign({ gameAction: GameActions.discardStatusToken(), subActionProperties: card => ({ target: card.personalHonor }) }, properties)
+        ),
+        'Select character to discard honored status token from'
+    ),
+    /**
+     * Cost that will break the province that initiated the ability
+     */
+    breakSelf: () => new GameActionCost(GameActions.break()),
+    /**
+     * Cost that will put into play the card that initiated the ability
+     */
+    putSelfIntoPlay: () => new GameActionCost(GameActions.putIntoPlay()),
+    /**
+     * Cost that will reveal specific cards
+     */
+    reveal: (cardFunc) => new GameActionCost(GameActions.reveal(context => ({ target: cardFunc(context) }))),
+    /**
+     * Cost that discards the Imperial Favor
+     */
+    discardImperialFavor: () => new GameActionCost(GameActions.loseImperialFavor(context => ({ target: context.player }))),
     /**
      * Cost that will pay the exact printed fate cost for the card.
      */
-    payPrintedFateCost: function() {
+    payPrintedFateCost: function () {
         return {
-            canPay: function(context) {
-
-                return context.player.fate >= context.source.getCost();
+            canPay: function (context) {
+                let amount = context.source.getCost();
+                return context.player.fate >= amount && (amount === 0 || context.player.checkRestrictions('spendFate', context));
             },
-            pay: function(context) {
-
-                context.player.fate -= context.source.getCost();
-            }
+            payEvent: function (context) {
+                const amount = context.source.getCost();
+                return new Event(EventNames.OnSpendFate, { amount, context }, event => event.context.player.fate -= event.amount);
+            },
+            canIgnoreForTargeting: true
         };
     },
     /**
@@ -428,45 +139,252 @@ const Costs = {
      * reducer effects the play has activated. Upon playing the card, all
      * matching reducer effects will expire, if applicable.
      */
-    payReduceableFateCost: function(playingType) {
-        return {
-            canPay: function(context) {
-
-                return context.player.fate >= context.player.getReducedCost(playingType, context.source);
-            },
-            pay: function(context) {
-
-                context.costs.fate = context.player.getReducedCost(playingType, context.source);
-                context.player.fate -= context.costs.fate;
-                context.player.markUsedReducers(playingType, context.source);
-
-            }
-        };
-    },
+    payReduceableFateCost: (ignoreType = false) => new ReduceableFateCost(ignoreType),
+    /**
+     * Cost that is dependent on context.targets[targetName]
+     */
+    payTargetDependentFateCost: (targetName, ignoreType = false) => new TargetDependentFateCost(targetName, ignoreType),
     /**
      * Cost in which the player must pay a fixed, non-reduceable amount of fate.
      */
-    payFate: function(amount) {
-        return {
-            canPay: function(context) {
-                return context.player.fate >= amount;
-            },
-            pay: function(context) {
-                context.game.addFate(context.player, -amount);
-            }
-        };
-    },
+    payFate: (amount = 1) => new GameActionCost(GameActions.loseFate(context => ({ target: context.player, amount }))),
     /**
      * Cost in which the player must pay a fixed, non-reduceable amount of honor.
      */
-    payHonor: function(amount) {
+    payHonor: (amount = 1) => new GameActionCost(GameActions.loseHonor(context => ({ target: context.player, amount }))),
+    giveHonorToOpponent: (amount = 1) => new GameActionCost(GameActions.takeHonor(context => ({ target: context.player, amount }))),
+    /**
+     * Cost where a character must spend fate to an unclaimed ring
+     */
+    payFateToRing: (amount = 1, ringCondition = ring => ring.isUnclaimed()) => new MetaActionCost(GameActions.selectRing({
+        ringCondition,
+        gameAction: GameActions.placeFateOnRing(context => ({ amount, origin: context.player }))
+    }), 'Select a ring to place fate on'),
+    giveFateToOpponent: (amount = 1) => new GameActionCost(GameActions.takeFate(context => ({ target: context.player, amount }))),
+    variableHonorCost: function (amount) {
         return {
-            canPay: function(context) {
-                return context.player.honor >= amount;
+            canPay: function (context) {
+                return context.game.actions.loseHonor().canAffect(context.player, context);
             },
-            pay: function(context) {
-                context.game.addHonor(context.player, -amount);
-            }
+            resolve: function (context, result) {
+                let max = Math.min(amount, context.player.honor);
+                let choices = Array.from(Array(max), (x, i) => String(i + 1));
+                if(result.canCancel) {
+                    choices.push('Cancel');
+                }
+                context.game.promptWithHandlerMenu(context.player, {
+                    activePromptTitle: 'Choose how much honor to pay',
+                    context: context,
+                    choices: choices,
+                    choiceHandler: choice => {
+                        if(choice === 'Cancel') {
+                            context.costs.variableHonorCost = 0;
+                            result.cancelled = true;
+                        } else {
+                            context.costs.variableHonorCost = parseInt(choice);
+                        }
+                    }
+                });
+            },
+            payEvent: function (context) {
+                let action = context.game.actions.loseHonor({ amount: context.costs.variableHonorCost });
+                return action.getEvent(context.player, context);
+            },
+            promptsPlayer: true
+        };
+    },
+    returnRings: function (amount = -1) {
+        return {
+            canPay: function (context) {
+                return Object.values(context.game.rings).some(ring => ring.claimedBy === context.player.name);
+            },
+            resolve: function (context, result) {
+                let chosenRings = [];
+                let promptPlayer = () => {
+                    let buttons = [];
+                    if(chosenRings.length > 0) {
+                        buttons.push({ text: 'Done', arg: 'done' });
+                    }
+                    if(result.canCancel) {
+                        buttons.push({ text: 'Cancel', arg: 'cancel' });
+                    }
+                    context.game.promptForRingSelect(context.player, {
+                        activePromptTitle: 'Choose a ring to return',
+                        context: context,
+                        buttons: buttons,
+                        ringCondition: ring => ring.claimedBy === context.player.name && !chosenRings.includes(ring),
+                        onSelect: (player, ring) => {
+                            chosenRings.push(ring);
+                            if(Object.values(context.game.rings).some(ring => ring.claimedBy === context.player.name && !chosenRings.includes(ring) && (amount < 0 || chosenRings.length < amount))) {
+                                promptPlayer();
+                            } else {
+                                context.costs.returnRing = chosenRings;
+                            }
+                            return true;
+                        },
+                        onMenuCommand: (player, arg) => {
+                            if(arg === 'done') {
+                                context.costs.returnRing = chosenRings;
+                                return true;
+                            }
+                        },
+                        onCancel: () => {
+                            context.costs.returnRing = [];
+                            result.cancelled = true;
+                        }
+                    });
+                };
+                promptPlayer();
+            },
+            payEvent: context => context.game.actions.returnRing({ target: context.costs.returnRing }).getEventArray(context),
+            promptsPlayer: true
+        };
+    },
+    chooseFate: function (type) {
+        return {
+            canPay: function () {
+                return true;
+            },
+            resolve: function (context, result) {
+                let extrafate = context.player.fate - context.player.getReducedCost(type, context.source);
+                if(!context.player.checkRestrictions('placeFateWhenPlayingCharacter', context) || !context.player.checkRestrictions('spendFate', context)) {
+                    extrafate = 0;
+                }
+                let choices = [];
+                let max = 3;
+                context.chooseFate = 0;
+                for(let i = 0; i <= Math.min(extrafate, max); i++) {
+                    choices.push(i);
+                }
+                let handlers = _.map(choices, fate => {
+                    return () => context.chooseFate += fate;
+                });
+
+                if(extrafate > max) {
+                    choices[3] = 'More';
+                    handlers[3] = () => {
+                        max += 3;
+                        context.chooseFate += 3;
+                        let zip = _.zip(choices, handlers);
+                        zip = _.filter(zip, array => {
+                            let choice = array[0];
+                            if(choice === 'Cancel') {
+                                return true;
+                            } else if(choice === 'More') {
+                                return extrafate >= max;
+                            }
+                            return extrafate >= choice + 3;
+                        });
+                        [choices, handlers] = _.unzip(_.map(zip, array => {
+                            let [choice, handler] = array;
+                            if(_.isNumber(choice)) {
+                                return [choice + 3, handler];
+                            }
+                            return [choice, handler];
+                        }));
+                        context.game.promptWithHandlerMenu(context.player, {
+                            activePromptTitle: 'Choose additional fate',
+                            source: context.source,
+                            choices: _.map(choices, choice => _.isString(choice) ? choice : choice.toString()),
+                            handlers: handlers
+                        });
+                    };
+                }
+                if(result.canCancel) {
+                    choices.push('Cancel');
+                    handlers.push(() => {
+                        result.cancelled = true;
+                    });
+                }
+
+                context.game.promptWithHandlerMenu(context.player, {
+                    activePromptTitle: 'Choose additional fate',
+                    source: context.source,
+                    choices: _.map(choices, choice => _.isString(choice) ? choice : choice.toString()),
+                    handlers: handlers
+                });
+            },
+            pay: function (context) {
+                context.player.fate -= context.chooseFate;
+            },
+            promptsPlayer: true
+        };
+    },
+
+    discardCardsUpToVariableX: function (amountFunc) {
+        return {
+            canPay: function (context) {
+                return amountFunc(context) > 0 && context.game.actions.chosenDiscard().canAffect(context.player, context);
+            },
+            resolve: function (context, result) {
+                let amount = amountFunc(context);
+                let max = Math.min(amount, context.player.hand.size());
+                context.game.promptForSelect(context.player, {
+                    activePromptTitle: 'Choose up to ' + max + ' card' + (amount === 1 ? '' : ('s')) + ' to discard',
+                    context: context,
+                    mode: TargetModes.UpTo,
+                    numCards: amount,
+                    ordered: false,
+                    location: Locations.Hand,
+                    controller: Players.Self,
+                    onSelect: (player, cards) => {
+                        if(cards.length === 0) {
+                            context.costs.discardCardsUpToVariableX = [];
+                            result.cancelled = true;
+                        } else {
+                            context.costs.discardCardsUpToVariableX = cards;
+                        }
+                        return true;
+                    },
+                    onCancel: () => {
+                        result.cancelled = true;
+                        return true;
+                    }
+                });
+            },
+            payEvent: function (context) {
+                let action = context.game.actions.discardCard({ target: context.costs.discardCardsUpToVariableX });
+                return action.getEvent(context.costs.discardCardsUpToVariableX, context);
+            },
+            promptsPlayer: true
+        };
+    },
+
+    discardCardsExactlyVariableX: function (amountFunc) {
+        return {
+            canPay: function (context) {
+                return amountFunc(context) > 0 && context.game.actions.chosenDiscard().canAffect(context.player, context);
+            },
+            resolve: function (context, result) {
+                let amount = amountFunc(context);
+                context.game.promptForSelect(context.player, {
+                    activePromptTitle: 'Choose ' + amount + ' card' + (amount === 1 ? '' : ('s')) + ' to discard',
+                    context: context,
+                    mode: TargetModes.Exactly,
+                    numCards: amount,
+                    ordered: false,
+                    location: Locations.Hand,
+                    controller: Players.Self,
+                    onSelect: (player, cards) => {
+                        if(cards.length === 0) {
+                            context.costs.discardCardsExactlyVariableX = [];
+                            result.cancelled = true;
+                        } else {
+                            context.costs.discardCardsExactlyVariableX = cards;
+                        }
+                        return true;
+                    },
+                    onCancel: () => {
+                        result.cancelled = true;
+                        return true;
+                    }
+                });
+            },
+            payEvent: function (context) {
+                let action = context.game.actions.discardCard({ target: context.costs.discardCardsExactlyVariableX });
+                return action.getEvent(context.costs.discardCardsExactlyVariableX, context);
+            },
+            promptsPlayer: true
         };
     }
 };

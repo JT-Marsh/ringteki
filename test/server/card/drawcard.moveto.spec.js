@@ -1,18 +1,41 @@
-const DrawCard = require('../../../server/game/drawcard.js');
+const DrawCard = require('../../../build/server/game/drawcard.js');
 
 describe('DrawCard', function () {
     beforeEach(function () {
         this.testCard = { code: '111', label: 'test 1(some pack)', name: 'test 1' };
-        this.gameSpy = jasmine.createSpyObj('game', ['raiseEvent']);
+        this.gameSpy = jasmine.createSpyObj('game', ['emitEvent']);
         this.card = new DrawCard({ game: this.gameSpy }, this.testCard);
-        spyOn(this.card.events, 'register');
-        spyOn(this.card.events, 'unregisterAll');
+        spyOn(this.card, 'removeLastingEffects');
     });
 
     describe('moveTo()', function() {
         it('should set the location', function() {
             this.card.moveTo('hand');
             expect(this.card.location).toBe('hand');
+        });
+
+        it('should call removeLastingEffects if moved between out of play areas', function() {
+            this.card.moveTo('dynasty discard pile');
+            this.card.moveTo('hand');
+            expect(this.card.removeLastingEffects.calls.count()).toBe(2);
+        });
+
+        it('should call removeLastingEffects if moved from out of play to play area', function() {
+            this.card.moveTo('province 1');
+            this.card.moveTo('play area');
+            expect(this.card.removeLastingEffects.calls.count()).toBe(2);
+        });
+
+        it('should call removeLastingEffects if moved from play area to an out of play area', function() {
+            this.card.moveTo('play area');
+            this.card.moveTo('conflict discard pile');
+            expect(this.card.removeLastingEffects.calls.count()).toBe(2);
+        });
+
+        it('should not call removeLastingEffects if moved between provinces', function() {
+            this.card.moveTo('province 1');
+            this.card.moveTo('province 2');
+            expect(this.card.removeLastingEffects.calls.count()).toBe(1);
         });
 
         describe('when the card is facedown', function() {
@@ -25,8 +48,8 @@ describe('DrawCard', function () {
                     this.card.moveTo('play area');
                 });
 
-                it('should not flip the card', function() {
-                    expect(this.card.facedown).toBe(true);
+                it('should flip the card', function() {
+                    expect(this.card.facedown).toBe(false);
                 });
             });
 
@@ -37,80 +60,6 @@ describe('DrawCard', function () {
 
                 it('should flip the card', function() {
                     expect(this.card.facedown).toBe(false);
-                });
-            });
-        });
-
-        describe('when the card has events', function() {
-            beforeEach(function() {
-                this.card.registerEvents(['foo', 'bar']);
-            });
-
-            describe('when in a non-event handling area', function() {
-                beforeEach(function() {
-                    this.card.location = 'discard pile';
-                });
-
-                describe('and moving to another non-event handling area', function() {
-                    beforeEach(function() {
-                        this.card.moveTo('dead pile');
-                    });
-
-                    it('should not register events', function() {
-                        expect(this.card.events.register).not.toHaveBeenCalled();
-                    });
-
-                    it('should not unregister events', function() {
-                        expect(this.card.events.unregisterAll).not.toHaveBeenCalled();
-                    });
-                });
-
-                describe('and moving to an event handling area', function() {
-                    beforeEach(function() {
-                        this.card.moveTo('play area');
-                    });
-
-                    it('should register events', function() {
-                        expect(this.card.events.register).toHaveBeenCalledWith(['foo', 'bar']);
-                    });
-
-                    it('should not unregister events', function() {
-                        expect(this.card.events.unregisterAll).not.toHaveBeenCalled();
-                    });
-                });
-            });
-
-            describe('when in an event handling area', function() {
-                beforeEach(function() {
-                    this.card.location = 'play area';
-                });
-
-                describe('and moving to another event handling area', function() {
-                    beforeEach(function() {
-                        this.card.moveTo('play area');
-                    });
-
-                    it('should not register events', function() {
-                        expect(this.card.events.register).not.toHaveBeenCalled();
-                    });
-
-                    it('should not unregister events', function() {
-                        expect(this.card.events.unregisterAll).not.toHaveBeenCalled();
-                    });
-                });
-
-                describe('and moving to a non-event handling area', function() {
-                    beforeEach(function() {
-                        this.card.moveTo('draw deck');
-                    });
-
-                    it('should not register events', function() {
-                        expect(this.card.events.register).not.toHaveBeenCalled();
-                    });
-
-                    it('should unregister events', function() {
-                        expect(this.card.events.unregisterAll).toHaveBeenCalled();
-                    });
                 });
             });
         });

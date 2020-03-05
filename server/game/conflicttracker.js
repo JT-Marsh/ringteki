@@ -3,6 +3,7 @@ const _ = require('underscore');
 class ConflictTracker {
     constructor() {
         this.complete = 0;
+        this.conflictOpportunities = 2;
         this.conflictTypes = {
             military: {
                 performed: 0,
@@ -60,6 +61,7 @@ class ConflictTracker {
     }
 
     reset() {
+        this.conflictOpportunities = 2;
         this.complete = 0;
         this.resetForType('military');
         this.resetForType('political');
@@ -99,6 +101,10 @@ class ConflictTracker {
         return this.conflictTypes[conflictType].lost;
     }
 
+    getTotalLost() {
+        return this.getLost('military') + this.getLost('political');
+    }
+
     getPerformed(conflictType) {
         return this.conflictTypes[conflictType].performed;
     }
@@ -116,8 +122,11 @@ class ConflictTracker {
     }
 
     perform(conflictType) {
-        this.conflictTypes[conflictType].performed++;
+        if(this.conflictTypes[conflictType] !== undefined) {
+            this.conflictTypes[conflictType].performed++;
+        }
         this.complete++;
+        this.usedConflictOpportunity();
     }
 
     won(conflictType, wasAttacker) {
@@ -132,6 +141,10 @@ class ConflictTracker {
 
     modifyMaxForType(conflictType, number) {
         this.conflictTypes[conflictType].max += number;
+    }
+
+    usedConflictOpportunity() {
+        this.conflictOpportunities--;
     }
 }
 

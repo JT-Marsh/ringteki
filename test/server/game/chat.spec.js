@@ -1,10 +1,11 @@
-const Game = require('../../../server/game/game.js');
-const Spectator = require('../../../server/game/spectator.js');
+const Game = require('../../../build/server/game/game.js');
+const Spectator = require('../../../build/server/game/spectator.js');
 
 describe('Game', function() {
     beforeEach(function() {
-        this.gameRepository = jasmine.createSpyObj('gameRepository', ['save']);
-        this.game = new Game('1', 'Test Game', { gameRepository: this.gameRepository });
+        this.gameService = jasmine.createSpyObj('gameService', ['save']);
+        this.game = new Game('1', 'Test Game', { gameService: this.gameService });
+        this.spy = spyOn(this.game, 'checkGameState');
 
         this.player = jasmine.createSpyObj('player', ['']);
         this.player.name = 'Player 1';
@@ -51,7 +52,7 @@ describe('Game', function() {
                 });
 
                 it('should add the chat messages', function() {
-                    expect(this.gameChat.addChatMessage).toHaveBeenCalledWith(jasmine.any(String), this.player, 'this is a message');
+                    expect(this.gameChat.addChatMessage).toHaveBeenCalledWith(this.player, 'this is a message');
                 });
             });
         });
@@ -73,7 +74,7 @@ describe('Game', function() {
                 });
 
                 it('should add it as a chat messages', function() {
-                    expect(this.gameChat.addChatMessage).toHaveBeenCalledWith(jasmine.any(String), this.player, '/this is a command');
+                    expect(this.gameChat.addChatMessage).toHaveBeenCalledWith(this.player, '/this is a command');
                 });
             });
 
@@ -85,7 +86,7 @@ describe('Game', function() {
                 });
 
                 it('should add the chat messages', function() {
-                    expect(this.gameChat.addChatMessage).toHaveBeenCalledWith(jasmine.any(String), this.player, 'this is a message');
+                    expect(this.gameChat.addChatMessage).toHaveBeenCalledWith(this.player, 'this is a message');
                 });
             });
         });

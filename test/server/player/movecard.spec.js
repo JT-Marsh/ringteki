@@ -1,21 +1,22 @@
 const _ = require('underscore');
-const Player = require('../../../server/game/player.js');
-const DrawCard = require('../../../server/game/drawcard.js');
+const Player = require('../../../build/server/game/player.js');
+const DrawCard = require('../../../build/server/game/drawcard.js');
 
 describe('Player', function() {
     describe('moveCard', function() {
         beforeEach(function() {
-            this.gameSpy = jasmine.createSpyObj('game', ['raiseEvent', 'getOtherPlayer', 'playerDecked']);
-            this.player = new Player('1', 'Player 1', true, this.gameSpy);
+            this.gameSpy = jasmine.createSpyObj('game', ['emitEvent', 'on', 'raiseEvent', 'getOtherPlayer', 'playerDecked', 'addMessage']);
+            this.gameSpy.effectEngine = jasmine.createSpyObj('effectEngine', ['removeLastingEffects']);
+            this.player = new Player('1', {username: 'Player 1', settings: {}}, true, this.gameSpy);
             this.player.initialise();
-            this.player.phase = 'dynasty';
 
             this.gameSpy.raiseEvent.and.callFake((name, params, handler) => {
                 if(handler) {
                     handler(params);
                 }
             });
-            this.card = new DrawCard(this.player, { code: '1', name: 'Test' });
+            this.card = new DrawCard(this.player, { code: '1', name: 'Test', type: 'character' });
+            this.card.isConflict = true;
             spyOn(this.card, 'leavesPlay');
         });
 
@@ -37,6 +38,8 @@ describe('Player', function() {
             });
 
             it('should add the card to the player dynasty discard pile', function() {
+                this.card.isDynasty = true;
+                this.card.isConflict = false;
                 this.player.moveCard(this.card, 'dynasty discard pile');
                 expect(this.player.dynastyDiscardPile).toContain(this.card);
                 expect(this.card.location).toBe('dynasty discard pile');
@@ -68,10 +71,6 @@ describe('Player', function() {
             it('should not make the card leave play', function() {
                 expect(this.card.leavesPlay).not.toHaveBeenCalled();
             });
-
-            it('should not to raise the left play event', function() {
-                expect(this.gameSpy.raiseEvent).not.toHaveBeenCalledWith('onCardLeftPlay', jasmine.any(Object), jasmine.any(Object));
-            });
         });
 
         describe('when the card is in the play area', function() {
@@ -85,34 +84,29 @@ describe('Player', function() {
                 expect(this.card.leavesPlay).toHaveBeenCalled();
             });
 
-            it('should raise the left play event', function() {
-                this.player.moveCard(this.card, 'conflict discard pile');
-                expect(this.gameSpy.raiseEvent).toHaveBeenCalled();
-            });
-
             describe('when the card has attachments', function() {
                 beforeEach(function() {
                     this.attachment = new DrawCard(this.player, {});
                     this.attachment.parent = this.card;
                     this.attachment.location = 'play area';
                     this.card.attachments.push(this.attachment);
-                    spyOn(this.player, 'removeAttachment');
+                    spyOn(this.attachment, 'leavesPlay');
 
                     this.player.moveCard(this.card, 'hand');
                 });
 
                 it('should remove the attachments', function() {
-                    expect(this.player.removeAttachment).toHaveBeenCalledWith(this.attachment, false);
+                    expect(this.attachment.leavesPlay).toHaveBeenCalled();
                 });
             });
 
             describe('when the card is an attachment', function() {
                 beforeEach(function() {
-                    this.attachment = new DrawCard(this.player, {});
+                    this.attachment = new DrawCard(this.player, { type: 'attachment' });
+                    this.attachment.isConflict = true;
                     this.attachment.parent = this.card;
                     this.attachment.location = 'play area';
                     this.card.attachments.push(this.attachment);
-                    spyOn(this.player, 'removeAttachment');
 
                     this.player.moveCard(this.attachment, 'hand');
                 });

@@ -1,4 +1,9 @@
-const _ = require('underscore');
+const AbilityTargetAbility = require('./AbilityTargets/AbilityTargetAbility.js');
+const AbilityTargetCard = require('./AbilityTargets/AbilityTargetCard.js');
+const AbilityTargetRing = require('./AbilityTargets/AbilityTargetRing.js');
+const AbilityTargetSelect = require('./AbilityTargets/AbilityTargetSelect.js');
+const AbilityTargetToken = require('./AbilityTargets/AbilityTargetToken.js');
+const { Stages, TargetModes } = require('./Constants.js');
 
 /**
  * Base class representing an ability that can be done by the player. This
@@ -15,13 +20,27 @@ class BaseAbility {
      * Creates an ability.
      *
      * @param {Object} properties - An object with ability related properties.
-     * @param {Object|Array} properties.cost - optional property that specifies
+     * @param {Object|Array} [properties.cost] - optional property that specifies
      * the cost for the ability. Can either be a cost object or an array of cost
      * objects.
+     * @param {Object} [properties.target] - optional property that specifies
+     * the target of the ability.
+     * @param [properties.gameAction] - GameAction[] optional array of game actions
      */
     constructor(properties) {
+        this.gameAction = properties.gameAction || [];
+        if(!Array.isArray(this.gameAction)) {
+            this.gameAction = [this.gameAction];
+        }
+        this.buildTargets(properties);
         this.cost = this.buildCost(properties.cost);
-        this.targets = this.buildTargets(properties);
+        for(const cost of this.cost) {
+            if(cost.dependsOn) {
+                let dependsOnTarget = this.targets.find(target => target.name === cost.dependsOn);
+                dependsOnTarget.dependentCost = cost;
+            }
+        }
+        this.nonDependentTargets = this.targets.filter(target => !target.properties.dependsOn);
     }
 
     buildCost(cost) {
@@ -29,7 +48,7 @@ class BaseAbility {
             return [];
         }
 
-        if(!_.isArray(cost)) {
+        if(!Array.isArray(cost)) {
             return [cost];
         }
 
@@ -37,17 +56,58 @@ class BaseAbility {
     }
 
     buildTargets(properties) {
+        this.targets = [];
         if(properties.target) {
-            return {
-                target: properties.target
-            };
+            this.targets.push(this.getAbilityTarget('target', properties.target));
+        } else if(properties.targets) {
+            for(const key of Object.keys(properties.targets)) {
+                this.targets.push(this.getAbilityTarget(key, properties.targets[key]));
+            }
         }
+    }
 
-        if(properties.targets) {
-            return properties.targets;
+    getAbilityTarget(name, properties) {
+        if(properties.gameAction) {
+            if(!Array.isArray(properties.gameAction)) {
+                properties.gameAction = [properties.gameAction];
+            }
+        } else {
+            properties.gameAction = [];
         }
+        if(properties.mode === TargetModes.Select) {
+            return new AbilityTargetSelect(name, properties, this);
+        } else if(properties.mode === TargetModes.Ring) {
+            return new AbilityTargetRing(name, properties, this);
+        } else if(properties.mode === TargetModes.Ability) {
+            return new AbilityTargetAbility(name, properties, this);
+        } else if(properties.mode === TargetModes.Token) {
+            return new AbilityTargetToken(name, properties, this);
+        }
+        return new AbilityTargetCard(name, properties, this);
+    }
 
-        return {};
+    /**
+     * @param {*} context
+     * @returns {String}
+     */
+    meetsRequirements(context, ignoredRequirements = []) {
+        // check legal targets exist
+        // check costs can be paid
+        // check for potential to change game state
+        if(!this.canPayCosts(context) && !ignoredRequirements.includes('cost')) {
+            return 'cost';
+        }
+        if(this.targets.length === 0) {
+            if(this.gameAction.length > 0 && !this.checkGameActionsForPotential(context)) {
+                return 'condition';
+            }
+            return '';
+        }
+        return this.canResolveTargets(context) ? '' : 'target';
+    }
+
+    checkGameActionsForPotential(context) {
+        return this.gameAction.some(gameAction => gameAction.hasLegalTarget(context));
     }
 
     /**
@@ -56,53 +116,43 @@ class BaseAbility {
      * @returns {Boolean}
      */
     canPayCosts(context) {
-        return _.all(this.cost, cost => cost.canPay(context));
+        let contextCopy = context.copy({ stage: Stages.Cost });
+        return this.getCosts(context).every(cost => cost.canPay(contextCopy));
     }
 
-    /**
-     * Resolves all costs for the ability prior to payment. Some cost objects
-     * have a `resolve` method in order to prompt the user to make a choice,
-     * such as choosing a card to kneel. Consumers of this method should wait
-     * until all costs have a `resolved` value of `true` before proceeding.
-     *
-     * @returns {Array} An array of cost resolution results.
-     */
-    resolveCosts(context) {
-        return _.map(this.cost, cost => {
-            if(cost.resolve) {
-                return cost.resolve(context);
-            }
-
-            return { resolved: true, value: cost.canPay(context) };
-        });
+    getCosts(context, playCosts = true, triggerCosts = true) { // eslint-disable-line no-unused-vars
+        if(!playCosts) {
+            return this.cost.filter(cost => !cost.isPlayCost);
+        }
+        return this.cost;
     }
 
-    /**
-     * Pays all costs for the ability simultaneously.
-     */
-    payCosts(context) {
-        _.each(this.cost, cost => {
-            cost.pay(context);
-        });
-    }
-
-    /**
-     * Return whether when unpay is implemented for the ability cost and the
-     * cost can be unpaid.
-     *
-     * @returns {boolean}
-     */
-    canUnpayCosts(context) {
-        return _.all(this.cost, cost => cost.unpay && cost.canUnpay(context));
-    }
-
-    /**
-     * Unpays each cost associated with the ability.
-     */
-    unpayCosts(context) {
-        _.each(this.cost, cost => {
-            cost.unpay(context);
-        });
+    resolveCosts(context, results) {
+        for(let cost of this.getCosts(context, results.playCosts, results.triggerCosts)) {
+            context.game.queueSimpleStep(() => {
+                if(!results.cancelled) {
+                    if(cost.addEventsToArray) {
+                        cost.addEventsToArray(results.events, context, results);
+                    } else {
+                        if(cost.resolve) {
+                            cost.resolve(context, results);
+                        }
+                        context.game.queueSimpleStep(() => {
+                            if(!results.cancelled) {
+                                let newEvents = cost.payEvent ? cost.payEvent(context) : context.game.getEvent('payCost', {}, () => cost.pay(context));
+                                if(Array.isArray(newEvents)) {
+                                    for(let event of newEvents) {
+                                        results.events.push(event);
+                                    }
+                                } else {
+                                    results.events.push(newEvents);
+                                }
+                            }
+                        });
+                    }
+                }
+            });
+        }
     }
 
     /**
@@ -111,48 +161,53 @@ class BaseAbility {
      * @returns {Boolean}
      */
     canResolveTargets(context) {
-        const ValidTypes = ['character', 'attachment', 'location', 'event'];
-        return _.all(this.targets, target => {
-            return context.game.allCards.any(card => {
-                if(!ValidTypes.includes(card.getType())) {
-                    return false;
-                }
-
-                return target.cardCondition(card, context);
-            });
-        });
+        return this.nonDependentTargets.every(target => target.canResolve(context));
     }
 
     /**
      * Prompts the current player to choose each target defined for the ability.
-     *
-     * @returns {Array} An array of target resolution objects.
      */
     resolveTargets(context) {
-        return _.map(this.targets, (targetProperties, name) => {
-            return this.resolveTarget(context, name, targetProperties);
-        });
+        let targetResults = {
+            canIgnoreAllCosts: context.stage === Stages.PreTarget ? this.cost.every(cost => cost.canIgnoreForTargeting) : false,
+            cancelled: false,
+            payCostsFirst: false,
+            delayTargeting: null
+        };
+        for(let target of this.targets) {
+            context.game.queueSimpleStep(() => target.resolve(context, targetResults));
+        }
+        return targetResults;
     }
 
-    resolveTarget(context, name, targetProperties) {
-        let cardCondition = targetProperties.cardCondition;
-        let otherProperties = _.omit(targetProperties, 'cardCondition');
-        let result = { resolved: false, name: name, value: null };
-        let promptProperties = {
-            source: context.source,
-            cardCondition: card => cardCondition(card, context),
-            onSelect: (player, card) => {
-                result.resolved = true;
-                result.value = card;
-                return true;
-            },
-            onCancel: () => {
-                result.resolved = true;
-                return true;
-            }
-        };
-        context.game.promptForSelect(context.player, _.extend(promptProperties, otherProperties));
-        return result;
+    resolveRemainingTargets(context, nextTarget) {
+        const index = this.targets.indexOf(nextTarget);
+        let targets = this.targets.slice();
+        if(targets.slice(0, index).every(target => target.checkTarget(context))) {
+            targets = targets.slice(index);
+        }
+        let targetResults = {};
+        for(const target of targets) {
+            context.game.queueSimpleStep(() => target.resolve(context, targetResults));
+        }
+        return targetResults;
+    }
+
+    hasLegalTargets(context) {
+        return this.nonDependentTargets.every(target => target.hasLegalTarget(context));
+    }
+
+    checkAllTargets(context) {
+        return this.nonDependentTargets.every(target => target.checkTarget(context));
+    }
+
+    hasTargetsChosenByInitiatingPlayer(context) {
+        return this.targets.some(target => target.hasTargetsChosenByInitiatingPlayer(context)) ||
+            this.gameAction.some(action => action.hasTargetsChosenByInitiatingPlayer(context)) ||
+            this.cost.some(cost => cost.hasTargetsChosenByInitiatingPlayer && cost.hasTargetsChosenByInitiatingPlayer(context));
+    }
+
+    displayMessage(context) { // eslint-disable-line no-unused-vars
     }
 
     /**
@@ -164,15 +219,23 @@ class BaseAbility {
     }
 
     isAction() {
-        return true;
+        return false;
     }
 
-    isPlayableEventAbility() {
+    isCardPlayed() {
         return false;
     }
 
     isCardAbility() {
-        return true;
+        return false;
+    }
+
+    isTriggeredAbility() {
+        return false;
+    }
+
+    isKeywordAbility() {
+        return false;
     }
 }
 
